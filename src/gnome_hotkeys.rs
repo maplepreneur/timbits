@@ -157,7 +157,7 @@ pub fn install(cfg: &Config) -> Result<bool> {
     let emoji_binding = to_gnome_binding(&cfg.emoji_hotkey)
         .unwrap_or_else(|| "<Super>period".into());
     let clip_binding = to_gnome_binding(&cfg.clipboard_hotkey)
-        .unwrap_or_else(|| "<Super>v".into());
+        .unwrap_or_else(|| "<Super><Shift>c".into());
 
     let mut paths = parse_path_list(&raw);
     for p in [EMOJI_PATH, CLIPBOARD_PATH] {
@@ -191,7 +191,10 @@ mod tests {
             to_gnome_binding("Super+Period").as_deref(),
             Some("<Super>period")
         );
-        assert_eq!(to_gnome_binding("Super+V").as_deref(), Some("<Super>v"));
+        assert_eq!(
+            to_gnome_binding("Super+Shift+C").as_deref(),
+            Some("<Super><Shift>c")
+        );
         assert_eq!(
             to_gnome_binding("Ctrl+Shift+Alt+F5").as_deref(),
             Some("<Control><Shift><Alt>F5")

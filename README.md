@@ -12,7 +12,7 @@ on other distros). Named after the Tim Hortons donut holes.
   (screenshots). Search filters everything, including **text inside images
   and image files** via OCR (tesseract). Arrow keys to navigate, **Enter**
   pastes into the previously focused window, **Ctrl+Delete** forgets an entry.
-- **Hotkeys** — set your own (default `Super+.` emoji, `Super+V` history).
+- **Hotkeys** — set your own (default `Super+.` emoji, `Super+Shift+C` history).
 
 ## Install
 
@@ -37,7 +37,7 @@ Edit hotkeys in `~/.config/timbits/config.toml`, then re-run `timbits install`
 
 ```toml
 emoji_hotkey = "Super+Period"
-clipboard_hotkey = "Super+V"
+clipboard_hotkey = "Super+Shift+C"
 max_entries = 500
 ocr_enabled = true
 ```
@@ -45,7 +45,7 @@ ocr_enabled = true
 ### GNOME / Zorin (Wayland)
 
 `timbits install` registers custom shortcuts automatically (defaults
-`Super+.` and `Super+V`). No manual Settings trip needed unless you prefer
+`Super+.` and `Super+Shift+C`). No manual Settings trip needed unless you prefer
 the GUI.
 
 ### Other Wayland desktops
@@ -55,7 +55,7 @@ Bind custom shortcuts in your DE to:
 | Name                | Command                          | Shortcut   |
 |---------------------|----------------------------------|------------|
 | Timbits Emoji       | `~/.local/bin/timbits emoji`     | `Super+.`  |
-| Timbits Clipboard   | `~/.local/bin/timbits clipboard` | `Super+V`  |
+| Timbits Clipboard   | `~/.local/bin/timbits clipboard` | `Super+Shift+C` |
 
 ### X11 sessions
 

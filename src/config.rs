@@ -11,7 +11,8 @@ pub struct Config {
     /// Hotkey for the emoji picker, e.g. "Super+Period" (X11 only; on Wayland
     /// bind `timbits emoji` via your desktop's keyboard settings instead).
     pub emoji_hotkey: String,
-    /// Hotkey for the clipboard history picker, e.g. "Super+V" (X11 only).
+    /// Hotkey for the clipboard history picker, e.g. "Super+Shift+C" (X11 only;
+    /// on Wayland, install registers the same binding via GNOME shortcuts).
     pub clipboard_hotkey: String,
     /// Maximum number of clipboard history entries kept.
     pub max_entries: i64,
@@ -24,7 +25,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             emoji_hotkey: "Super+Period".into(),
-            clipboard_hotkey: "Super+V".into(),
+            clipboard_hotkey: "Super+Shift+C".into(),
             max_entries: 500,
             ocr_enabled: true,
         }

@@ -89,7 +89,7 @@ USAGE:
     timbits install      Set up config, autostart and launcher entries
 
 HOTKEYS:
-    On X11 the daemon binds hotkeys from {} (default Super+. and Super+V).
+    On X11 the daemon binds hotkeys from {} (default Super+. and Super+Shift+C).
     On GNOME/Zorin Wayland, `timbits install` registers custom shortcuts automatically.
     Otherwise bind your desktop shortcuts to:
         {exe} emoji

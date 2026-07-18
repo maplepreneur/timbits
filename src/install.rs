@@ -126,7 +126,7 @@ Config: {}
 --------------
 On Wayland: Settings → Keyboard → Keyboard Shortcuts → Custom Shortcuts → +
     Name: Timbits Emoji       Command: {exe_s} emoji       Shortcut: Super+.
-    Name: Timbits Clipboard   Command: {exe_s} clipboard   Shortcut: Super+V
+    Name: Timbits Clipboard   Command: {exe_s} clipboard   Shortcut: Super+Shift+C
 
 On X11 sessions the daemon grabs these hotkeys automatically (edit them in
 {}). Make sure the daemon is running (it autostarts on login):

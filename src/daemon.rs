@@ -194,7 +194,7 @@ mod tests {
     #[test]
     fn parses_hotkeys() {
         assert!(super::parse_hotkey("Super+Period").is_some());
-        assert!(super::parse_hotkey("Super+V").is_some());
+        assert!(super::parse_hotkey("Super+Shift+C").is_some());
         assert!(super::parse_hotkey("Ctrl+Shift+Alt+F5").is_some());
         assert!(super::parse_hotkey("ctrl + space").is_some());
         assert!(super::parse_hotkey("NotARealKey").is_none());
