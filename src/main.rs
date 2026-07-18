@@ -4,6 +4,7 @@ mod clip;
 mod config;
 mod daemon;
 mod emoji_picker;
+mod gnome_hotkeys;
 mod history_picker;
 mod install;
 mod ocr;
@@ -31,14 +32,28 @@ fn main() -> Result<()> {
         Some("clipboard") | Some("clip") => {
             config::ensure_dirs()?;
             if let Some(entry) = history_picker::run()? {
+                // Bump recency so re-pasted items stay near the top.
+                if let Ok(store) = storage::Store::open(&config::db_path()) {
+                    let _ = store.touch(entry.id);
+                }
                 match entry.kind {
                     EntryKind::Image => {
                         if let Some(path) = &entry.image_path {
                             paste::stage_image(Path::new(path))?;
                             paste::paste_staged("image")?;
+                        } else if let Some(text) = &entry.text {
+                            // Image entry that only has a path list (rare).
+                            paste::stage_text(text)?;
+                            paste::paste_staged("text")?;
                         }
                     }
-                    EntryKind::Text | EntryKind::Files => {
+                    EntryKind::Files => {
+                        if let Some(text) = &entry.text {
+                            paste::stage_text(text)?;
+                            paste::paste_staged("files")?;
+                        }
+                    }
+                    EntryKind::Text => {
                         if let Some(text) = &entry.text {
                             paste::stage_text(text)?;
                             paste::paste_staged("text")?;
@@ -75,12 +90,13 @@ USAGE:
 
 HOTKEYS:
     On X11 the daemon binds hotkeys from {} (default Super+. and Super+V).
-    On Wayland, add custom shortcuts in your desktop settings that run:
+    On GNOME/Zorin Wayland, `timbits install` registers custom shortcuts automatically.
+    Otherwise bind your desktop shortcuts to:
         {exe} emoji
         {exe} clipboard
 
 NOTES:
-    - Install tesseract-ocr for searchable text inside copied images.
+    - Install tesseract-ocr for searchable text inside copied images and image files.
     - On Wayland, pasting needs `wtype` or a running `ydotoold`.",
         config::config_path().display(),
     );

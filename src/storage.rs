@@ -152,6 +152,16 @@ impl Store {
         Ok(())
     }
 
+    /// Bump last_used_at / use_count when the user pastes an entry.
+    pub fn touch(&self, id: i64) -> Result<()> {
+        let now = now_ts();
+        self.conn.execute(
+            "UPDATE entries SET last_used_at = ?1, use_count = use_count + 1 WHERE id = ?2",
+            params![now, id],
+        )?;
+        Ok(())
+    }
+
     /// Delete an entry; returns its image path (so the caller can unlink it).
     pub fn delete(&self, id: i64) -> Result<Option<String>> {
         let path: Option<Option<String>> = self
@@ -275,6 +285,22 @@ mod tests {
         }
         store.trim(3)?;
         assert_eq!(store.count()?, 3);
+        std::fs::remove_file(&path).ok();
+        Ok(())
+    }
+
+    #[test]
+    fn touch_bumps_recency() -> Result<()> {
+        let path = temp_db("touch");
+        let store = Store::open(&path)?;
+        let old = store.upsert(EntryKind::Text, Some("older"), None, "ha", "older")?;
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        let _new = store.upsert(EntryKind::Text, Some("newer"), None, "hb", "newer")?;
+        // Touch the older entry — it should sort first.
+        store.touch(old)?;
+        let all = store.search("", 10)?;
+        assert_eq!(all[0].id, old);
+        assert!(all[0].use_count >= 2);
         std::fs::remove_file(&path).ok();
         Ok(())
     }

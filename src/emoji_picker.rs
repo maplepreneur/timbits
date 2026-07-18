@@ -77,10 +77,14 @@ impl EmojiApp {
         let query = self.search.trim().to_lowercase();
         let words: Vec<&str> = query.split_whitespace().collect();
         let mut shown: Vec<Shown> = Vec::new();
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
 
         if words.is_empty() {
-            // Recent emojis first when nothing is typed.
+            // Recent emojis first when nothing is typed (deduped against the full list below).
             for recent in Self::load_recents() {
+                if !seen.insert(recent.clone()) {
+                    continue;
+                }
                 let name = self
                     .all
                     .iter()
@@ -88,7 +92,7 @@ impl EmojiApp {
                     .map(|(_, n, _)| n.clone())
                     .unwrap_or_else(|| "recent".into());
                 shown.push(Shown {
-                    text: recent.clone(),
+                    text: recent,
                     name,
                 });
             }
@@ -98,12 +102,16 @@ impl EmojiApp {
             if shown.len() >= MAX_SHOWN {
                 break;
             }
-            if words.iter().all(|w| key.contains(w)) {
-                shown.push(Shown {
-                    text: (*emoji).to_string(),
-                    name: name.clone(),
-                });
+            if !words.iter().all(|w| key.contains(w)) {
+                continue;
             }
+            if !seen.insert((*emoji).to_string()) {
+                continue;
+            }
+            shown.push(Shown {
+                text: (*emoji).to_string(),
+                name: name.clone(),
+            });
         }
 
         self.shown = shown;

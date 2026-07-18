@@ -18,14 +18,15 @@ One binary, subcommands dispatched in `src/main.rs`:
 |---|---|
 | `config.rs` | TOML config + XDG paths (`~/.config/timbits`, `~/.local/share/timbits`) |
 | `storage.rs` | SQLite layer (`history.db`). Entries: text/image/files, dedupe by content hash, `ocr_text` column makes images searchable |
-| `clip.rs` | Clipboard read (arboard), hashing, PNG saving, ingest pipeline, `__serve-clip` helper |
+| `clip.rs` | Clipboard read (arboard: file_list → text → image), hashing, PNG saving, ingest + OCR, `__serve-clip` helper |
 | `ocr.rs` | Shells out to `tesseract` CLI at runtime (optional, no dev deps) |
 | `paste.rs` | Stage content → spawn `__serve-clip` → synthesize Ctrl+V (`wtype`/`ydotool` on Wayland, `enigo`/`xdotool` on X11) |
 | `daemon.rs` | Clipboard poll loop (700 ms) + X11 global hotkeys (global-hotkey crate) + hotkey string parser |
 | `emoji_picker.rs` | egui emoji grid: search-first, arrow-key nav, Enter pastes, recents file |
 | `history_picker.rs` | egui history list + preview pane; ingests clipboard on open (focused-window read works on GNOME Wayland) |
 | `ui_common.rs` | Shared egui setup: window options, bundled emoji font, misc helpers |
-| `install.rs` | `timbits install`: default config, autostart entry, launcher entries, hotkey guide |
+| `install.rs` | `timbits install`: default config, autostart, launcher entries, GNOME hotkeys |
+| `gnome_hotkeys.rs` | GNOME/Zorin custom keybindings via `gsettings` (Wayland hotkeys) |
 
 ## Key design decisions (don't regress these!)
 
@@ -65,5 +66,5 @@ One binary, subcommands dispatched in `src/main.rs`:
 ```
 Cargo.toml  install.sh  README.md  AGENTS.md
 assets/NotoEmoji.ttf
-src/{main,config,storage,clip,ocr,paste,daemon,emoji_picker,history_picker,install,ui_common}.rs
+src/{main,config,storage,clip,ocr,paste,daemon,emoji_picker,history_picker,install,gnome_hotkeys,ui_common}.rs
 ```

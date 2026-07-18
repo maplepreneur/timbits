@@ -8,10 +8,10 @@ on other distros). Named after the Tim Hortons donut holes.
 - **Emoji picker** — opens with the cursor in the search box. Type to search
   ~1900 emojis by name/keyword, move with the arrow keys, hit **Enter** and the
   emoji is pasted right where your cursor was. Remembers recent picks.
-- **Clipboard history** — stores text, file copies and images (screenshots).
-  Search filters everything, including **text inside images** via OCR
-  (tesseract). Arrow keys to navigate, **Enter** pastes into the previously
-  focused window, **Ctrl+Delete** forgets an entry.
+- **Clipboard history** — stores text, file copies (uri-list) and images
+  (screenshots). Search filters everything, including **text inside images
+  and image files** via OCR (tesseract). Arrow keys to navigate, **Enter**
+  pastes into the previously focused window, **Ctrl+Delete** forgets an entry.
 - **Hotkeys** — set your own (default `Super+.` emoji, `Super+V` history).
 
 ## Install
@@ -21,32 +21,19 @@ on other distros). Named after the Tim Hortons donut holes.
 ```
 
 This builds a release binary into `~/.local/bin/timbits`, writes a default
-config, adds an autostart entry for the daemon, and creates launcher entries.
+config, adds an autostart entry for the daemon, creates launcher entries, and
+on **GNOME / Zorin** registers the emoji and clipboard hotkeys via `gsettings`.
 
 Requirements:
 
 - **Rust toolchain** (build time) — https://rustup.rs
-- **Wayland pasting**: `wtype` (or a running `ydotoold`) — *already installed
-  on this machine*
+- **Wayland pasting**: `wtype` (or a running `ydotoold`)
 - **Optional, for image OCR**: `sudo apt install tesseract-ocr`
 
 ## Hotkey setup
 
-### Wayland (Zorin OS default)
-
-GNOME/Wayland does not let apps grab global hotkeys, so bind custom shortcuts:
-
-**Settings → Keyboard → Keyboard Shortcuts → Custom Shortcuts → +**
-
-| Name                | Command                        | Shortcut   |
-|---------------------|--------------------------------|------------|
-| Timbits Emoji       | `~/.local/bin/timbits emoji`   | `Super+.`  |
-| Timbits Clipboard   | `~/.local/bin/timbits clipboard` | `Super+V` |
-
-### X11 sessions
-
-The daemon grabs the hotkeys automatically. Edit them in
-`~/.config/timbits/config.toml`:
+Edit hotkeys in `~/.config/timbits/config.toml`, then re-run `timbits install`
+(or restart the daemon on X11):
 
 ```toml
 emoji_hotkey = "Super+Period"
@@ -55,8 +42,25 @@ max_entries = 500
 ocr_enabled = true
 ```
 
-Then make sure the daemon is running (it autostarts on login after install, or
-run `timbits daemon &`).
+### GNOME / Zorin (Wayland)
+
+`timbits install` registers custom shortcuts automatically (defaults
+`Super+.` and `Super+V`). No manual Settings trip needed unless you prefer
+the GUI.
+
+### Other Wayland desktops
+
+Bind custom shortcuts in your DE to:
+
+| Name                | Command                          | Shortcut   |
+|---------------------|----------------------------------|------------|
+| Timbits Emoji       | `~/.local/bin/timbits emoji`     | `Super+.`  |
+| Timbits Clipboard   | `~/.local/bin/timbits clipboard` | `Super+V`  |
+
+### X11 sessions
+
+The daemon grabs the hotkeys automatically. Make sure it is running (it
+autostarts on login after install, or run `timbits daemon &`).
 
 ## Usage
 
