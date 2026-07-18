@@ -65,6 +65,6 @@ One binary, subcommands dispatched in `src/main.rs`:
 
 ```
 Cargo.toml  install.sh  README.md  AGENTS.md
-assets/NotoEmoji.ttf
+assets/NotoEmoji.ttf  assets/logo.png
 src/{main,config,storage,clip,ocr,paste,daemon,emoji_picker,history_picker,install,gnome_hotkeys,ui_common}.rs
 ```

@@ -1,12 +1,17 @@
 //! `timbits install`: write a default config, autostart entry for the daemon,
-//! application launcher entries, and (on GNOME/Zorin) register hotkeys.
+//! application launcher entries, desktop icon, and (on GNOME/Zorin) hotkeys.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::fs;
 use std::path::PathBuf;
+use std::process::Command;
 
 use crate::config::{self, Config};
 use crate::gnome_hotkeys;
+use crate::ui_common;
+
+/// Icon theme sizes to install under hicolor.
+const ICON_SIZES: &[u32] = &[16, 24, 32, 48, 64, 128, 256, 512];
 
 pub fn run() -> Result<()> {
     config::ensure_dirs()?;
@@ -22,6 +27,10 @@ pub fn run() -> Result<()> {
     let exe = gnome_hotkeys::resolve_binary();
     let exe_s = exe.display().to_string();
 
+    // Desktop/app icons (hicolor theme → Icon=timbits).
+    let icon_path = install_icons().context("installing app icons")?;
+    println!("App icon: {}", icon_path.display());
+
     // Autostart the daemon on login.
     let autostart = xdg_autostart_dir();
     fs::create_dir_all(&autostart)?;
@@ -29,6 +38,7 @@ pub fn run() -> Result<()> {
         "Timbits Daemon",
         "Clipboard history watcher for Timbits",
         &format!("{exe_s} daemon"),
+        false,
     );
     fs::write(autostart.join("timbits.desktop"), daemon_entry)?;
     println!(
@@ -47,6 +57,7 @@ pub fn run() -> Result<()> {
             "Timbits Emoji Picker",
             "Pick and paste an emoji",
             &format!("{exe_s} emoji"),
+            true,
         ),
     )?;
     fs::write(
@@ -55,9 +66,29 @@ pub fn run() -> Result<()> {
             "Timbits Clipboard History",
             "Search and paste clipboard history",
             &format!("{exe_s} clipboard"),
+            true,
+        ),
+    )?;
+    // Combined entry for app menus.
+    fs::write(
+        apps.join("timbits.desktop"),
+        desktop_entry(
+            "Timbits",
+            "Emoji picker and clipboard history",
+            &format!("{exe_s} clipboard"),
+            true,
         ),
     )?;
     println!("Launcher entries: {}", apps.display());
+
+    // Refresh icon / desktop caches when tools are available.
+    let _ = Command::new("gtk-update-icon-cache")
+        .args(["-f", "-t"])
+        .arg(icons_root())
+        .status();
+    let _ = Command::new("update-desktop-database")
+        .arg(&apps)
+        .status();
 
     // GNOME/Zorin: wire hotkeys automatically when gsettings is available.
     let gnome_ok = match gnome_hotkeys::install(&cfg) {
@@ -115,6 +146,58 @@ For pasting on Wayland, `wtype` or a running `ydotoold` is required.
     Ok(())
 }
 
+fn icons_root() -> PathBuf {
+    dirs::data_dir()
+        .unwrap_or_else(|| config::data_dir())
+        .join("icons")
+        .join("hicolor")
+}
+
+/// Decode the bundled logo and write sized PNGs into the user hicolor theme.
+/// Returns the path of the largest installed icon (useful for absolute Icon=).
+fn install_icons() -> Result<PathBuf> {
+    let root = icons_root();
+    let rgba = image::load_from_memory(ui_common::LOGO_PNG)
+        .context("decoding bundled logo.png")?
+        .to_rgba8();
+    let (src_w, src_h) = rgba.dimensions();
+
+    let mut largest = root.join("512x512/apps/timbits.png");
+
+    for &size in ICON_SIZES {
+        let dir = root.join(format!("{size}x{size}")).join("apps");
+        fs::create_dir_all(&dir)?;
+        let dest = dir.join("timbits.png");
+        if size == src_w && size == src_h {
+            rgba.save(&dest)?;
+        } else {
+            let resized = image::imageops::resize(
+                &rgba,
+                size,
+                size,
+                image::imageops::FilterType::Lanczos3,
+            );
+            resized.save(&dest)?;
+        }
+        if size == *ICON_SIZES.last().unwrap() {
+            largest = dest;
+        }
+    }
+
+    // Also drop a scalable-friendly copy under pixmaps for older menus.
+    let pixmaps = dirs::data_dir()
+        .unwrap_or_else(|| config::data_dir())
+        .join("pixmaps");
+    fs::create_dir_all(&pixmaps)?;
+    fs::copy(
+        root.join("256x256/apps/timbits.png"),
+        pixmaps.join("timbits.png"),
+    )
+    .ok();
+
+    Ok(largest)
+}
+
 fn xdg_autostart_dir() -> PathBuf {
     config::config_dir()
         .parent()
@@ -122,15 +205,18 @@ fn xdg_autostart_dir() -> PathBuf {
         .unwrap_or_else(|| config::config_dir().join("autostart"))
 }
 
-fn desktop_entry(name: &str, comment: &str, exec: &str) -> String {
+fn desktop_entry(name: &str, comment: &str, exec: &str, show_in_menu: bool) -> String {
+    let no_display = if show_in_menu { "false" } else { "true" };
     format!(
         "[Desktop Entry]\n\
          Type=Application\n\
          Name={name}\n\
          Comment={comment}\n\
          Exec={exec}\n\
-         Icon=face-smile\n\
+         Icon=timbits\n\
          Terminal=false\n\
-         Categories=Utility;\n"
+         Categories=Utility;Accessibility;\n\
+         StartupWMClass=timbits\n\
+         NoDisplay={no_display}\n"
     )
 }

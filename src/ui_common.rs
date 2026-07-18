@@ -1,6 +1,7 @@
 //! Shared egui helpers for the picker windows.
 
 use eframe::egui;
+use std::sync::Arc;
 
 use crate::storage::{now_ts, EntryKind};
 
@@ -9,14 +10,23 @@ use crate::storage::{now_ts, EntryKind};
 /// which renders everywhere.
 const EMOJI_FONT: &[u8] = include_bytes!("../assets/NotoEmoji.ttf");
 
+/// App logo (window decorations + install-time desktop icons).
+pub const LOGO_PNG: &[u8] = include_bytes!("../assets/logo.png");
+
 pub fn native_options(title: &str, width: f32, height: f32) -> eframe::NativeOptions {
+    let mut viewport = egui::ViewportBuilder::default()
+        .with_title(title)
+        .with_app_id("timbits")
+        .with_inner_size([width, height])
+        .with_min_inner_size([380.0, 260.0])
+        .with_window_level(egui::WindowLevel::AlwaysOnTop);
+
+    if let Ok(icon) = eframe::icon_data::from_png_bytes(LOGO_PNG) {
+        viewport = viewport.with_icon(Arc::new(icon));
+    }
+
     eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_title(title)
-            .with_app_id("timbits")
-            .with_inner_size([width, height])
-            .with_min_inner_size([380.0, 260.0])
-            .with_window_level(egui::WindowLevel::AlwaysOnTop),
+        viewport,
         ..Default::default()
     }
 }
