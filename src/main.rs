@@ -3,8 +3,11 @@
 mod clip;
 mod config;
 mod daemon;
+mod emoji_aliases;
+mod emoji_db;
 mod emoji_picker;
 mod emoji_raster;
+mod emoji_update;
 mod focus;
 mod gnome_hotkeys;
 mod history_picker;
@@ -26,8 +29,7 @@ fn main() -> Result<()> {
     let arg = std::env::args().nth(1);
     match arg.as_deref() {
         Some("emoji") => {
-            // Timbits egui picker for UI; paste_helper.py for the proven
-            // wl-copy + ydotool super+v path (from emoji-picker.sh).
+            // egui UI + pure-Rust paste (wl-copy + ydotool super+v / uinput).
             config::ensure_dirs()?;
             let focus_before = paste::snapshot_focus_class();
             let prev = focus::capture_focused();
@@ -71,6 +73,45 @@ fn main() -> Result<()> {
         }
         Some("daemon") => daemon::run()?,
         Some("install") => install::run()?,
+        Some("update-emojis") => {
+            let assets = std::env::args().any(|a| a == "--assets");
+            if assets {
+                let root = std::env::var("CARGO_MANIFEST_DIR")
+                    .map(std::path::PathBuf::from)
+                    .or_else(|_| {
+                        // Walk up from cwd looking for the repo root.
+                        let mut dir = std::env::current_dir()?;
+                        loop {
+                            if dir.join("Cargo.toml").is_file() && dir.join("assets").is_dir() {
+                                return Ok(dir);
+                            }
+                            if !dir.pop() {
+                                anyhow::bail!(
+                                    "could not find workspace root for --assets \
+                                     (set CARGO_MANIFEST_DIR or run from the repo)"
+                                );
+                            }
+                        }
+                    })?;
+                let report = emoji_update::update_workspace_assets(&root)?;
+                println!(
+                    "Wrote {} ({} emoji, Unicode {})",
+                    report.json_path.display(),
+                    report.count,
+                    report.version
+                );
+                println!("Rebuild (`cargo build --release`) to ship the new catalogue in the binary.");
+            } else {
+                let report = emoji_update::update_user_catalogue()?;
+                println!(
+                    "Updated {} ({} emoji, Unicode {})",
+                    report.json_path.display(),
+                    report.count,
+                    report.version
+                );
+                println!("Open the emoji picker to use the new catalogue.");
+            }
+        }
         Some("settings") | Some("prefs") | Some("preferences") => {
             config::ensure_dirs()?;
             settings::run()?;
@@ -99,6 +140,7 @@ USAGE:
     timbits settings     Open preferences (hotkeys, OCR, history size)
     timbits daemon       Watch clipboard + register hotkeys (run at login)
     timbits install      Set up config, autostart and launcher entries
+    timbits update-emojis  Download latest Unicode emoji catalogue (network)
 
 HOTKEYS:
     On X11 the daemon binds hotkeys from {} (default Super+. and Super+Shift+C).

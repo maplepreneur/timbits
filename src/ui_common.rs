@@ -1,10 +1,12 @@
-//! Shared egui helpers — floating GNOME-styled chrome for the pickers.
+//! Shared egui helpers — floating chrome + system GTK theme palette.
 
 use eframe::egui::{
     self, Color32, CornerRadius, Frame, Margin, RichText, Sense, Stroke, Vec2, Visuals,
 };
+use std::collections::HashMap;
+use std::path::PathBuf;
 use std::process::Command;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use crate::storage::{now_ts, EntryKind};
 
@@ -15,9 +17,10 @@ const EMOJI_FONT: &[u8] = include_bytes!("../assets/NotoEmoji.ttf");
 /// App logo (window decorations + install-time desktop icons + empty states).
 pub const LOGO_PNG: &[u8] = include_bytes!("../assets/logo.png");
 
-// ── GNOME / Adwaita-inspired palette (follows system dark/light) ──────────
+// ── Live GNOME / Zorin GTK theme palette ──────────────────────────────────
 
-/// Semantic colors sampled once per process (matches GNOME color-scheme).
+/// Semantic colors taken from the **active GTK theme** (`@define-color` in
+/// gtk.css), not a hard-coded Adwaita approximation.
 #[derive(Clone, Copy)]
 pub struct Palette {
     pub is_dark: bool,
@@ -36,85 +39,417 @@ pub struct Palette {
 
 impl Palette {
     pub fn current() -> Self {
-        let is_dark = system_prefers_dark();
-        let accent = system_accent();
-        if is_dark {
-            // Adwaita dark–ish (works with Zorin/Dracula sessions too)
-            Self {
-                is_dark: true,
-                accent,
-                accent_fg: Color32::WHITE,
-                bg: Color32::from_rgb(0x24, 0x24, 0x24),
-                bg_raised: Color32::from_rgb(0x30, 0x30, 0x30),
-                bg_shade: Color32::from_rgb(0x1e, 0x1e, 0x1e),
-                view: Color32::from_rgb(0x1d, 0x1d, 0x1d),
-                border: Color32::from_rgb(0x3d, 0x3d, 0x3d),
-                text: Color32::from_rgb(0xff, 0xff, 0xff),
-                text_muted: Color32::from_rgb(0x9a, 0x9a, 0x9a),
-                selection: Color32::from_rgba_unmultiplied(accent.r(), accent.g(), accent.b(), 55),
-                hover: Color32::from_rgb(0x3a, 0x3a, 0x3a),
-            }
+        static CACHED: OnceLock<Palette> = OnceLock::new();
+        *CACHED.get_or_init(load_system_palette)
+    }
+}
+
+fn load_system_palette() -> Palette {
+    let is_dark = system_prefers_dark();
+    let vars = load_gtk_named_colors(is_dark);
+
+    let bg = resolve_color(&vars, &["theme_bg_color", "bg_color"])
+        .unwrap_or(if is_dark {
+            Color32::from_rgb(0x24, 0x24, 0x24)
         } else {
-            Self {
-                is_dark: false,
-                accent,
-                accent_fg: Color32::WHITE,
-                bg: Color32::from_rgb(0xfa, 0xfa, 0xfa),
-                bg_raised: Color32::from_rgb(0xff, 0xff, 0xff),
-                bg_shade: Color32::from_rgb(0xf0, 0xf0, 0xf0),
-                view: Color32::from_rgb(0xff, 0xff, 0xff),
-                border: Color32::from_rgb(0xcd, 0xcd, 0xcd),
-                text: Color32::from_rgb(0x2e, 0x34, 0x36),
-                text_muted: Color32::from_rgb(0x77, 0x76, 0x7b),
-                selection: Color32::from_rgba_unmultiplied(accent.r(), accent.g(), accent.b(), 40),
-                hover: Color32::from_rgb(0xeb, 0xeb, 0xeb),
+            Color32::from_rgb(0xfa, 0xfa, 0xfa)
+        });
+    let view = resolve_color(
+        &vars,
+        &["theme_base_color", "content_view_bg", "base_color", "text_view_bg"],
+    )
+    .unwrap_or(if is_dark {
+        Color32::from_rgb(0x1d, 0x1d, 0x1d)
+    } else {
+        Color32::from_rgb(0xff, 0xff, 0xff)
+    });
+    let text = resolve_color(&vars, &["theme_fg_color", "theme_text_color", "fg_color", "text_color"])
+        .unwrap_or(if is_dark {
+            Color32::WHITE
+        } else {
+            Color32::from_rgb(0x2e, 0x34, 0x36)
+        });
+    let text_muted = resolve_color(
+        &vars,
+        &[
+            "insensitive_fg_color",
+            "placeholder_text_color",
+            "theme_unfocused_fg_color",
+            "unfocused_fg_color",
+        ],
+    )
+    .unwrap_or(mix(text, bg, 0.45));
+    let border_raw = resolve_color_rgba(&vars, &["borders", "unfocused_borders"]);
+    let border = match border_raw {
+        Some((c, a)) if a < 0.05 || (c.r() == 0 && c.g() == 0 && c.b() == 0 && a < 0.15) => {
+            // "transparent" / invisible borders → subtle edge from text on bg
+            mix(text, bg, 0.18)
+        }
+        Some((c, a)) if a < 0.99 => blend_over(c, a, bg),
+        Some((c, _)) => c,
+        None => mix(text, bg, 0.22),
+    };
+    let sel = resolve_color_rgba(
+        &vars,
+        &["theme_selected_bg_color", "selected_bg_color"],
+    );
+    let (selection, accent_from_sel) = match sel {
+        Some((c, a)) if a < 0.99 => (blend_over(c, a, view), c),
+        Some((c, _)) => (
+            Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), if is_dark { 55 } else { 40 }),
+            c,
+        ),
+        None => {
+            let a = system_accent_gsettings();
+            (
+                Color32::from_rgba_unmultiplied(a.r(), a.g(), a.b(), if is_dark { 55 } else { 40 }),
+                a,
+            )
+        }
+    };
+    // Prefer theme selection as accent (Dracula pink/purple, Zorin accent, …);
+    // fall back to GNOME accent-color gsetting for stock Adwaita.
+    let accent = accent_from_sel;
+    let accent_fg = resolve_color(
+        &vars,
+        &["theme_selected_fg_color", "selected_fg_color"],
+    )
+    .unwrap_or_else(|| contrast_fg(accent));
+
+    let bg_raised = resolve_color(&vars, &["header_bg_color", "wm_bg_a"])
+        .unwrap_or_else(|| lighten(view, if is_dark { 0.08 } else { 0.02 }));
+    let bg_shade = resolve_color(&vars, &["insensitive_bg_color", "theme_unfocused_bg_color"])
+        .unwrap_or_else(|| darken(bg, if is_dark { 0.06 } else { 0.04 }));
+    let hover = resolve_color(&vars, &["wm_button_hover_color_a", "wm_button_hover_color_b"])
+        .unwrap_or_else(|| lighten(view, if is_dark { 0.12 } else { 0.06 }));
+
+    log::info!(
+        "theme palette: dark={is_dark} bg={bg:?} view={view:?} text={text:?} accent={accent:?}"
+    );
+
+    Palette {
+        is_dark,
+        accent,
+        accent_fg,
+        bg,
+        bg_raised,
+        bg_shade,
+        view,
+        border,
+        text,
+        text_muted,
+        selection,
+        hover,
+    }
+}
+
+/// Load `@define-color` map from active GTK theme + user gtk.css overrides.
+fn load_gtk_named_colors(is_dark: bool) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    for path in gtk_css_candidates(is_dark) {
+        if !path.is_file() {
+            continue;
+        }
+        if let Ok(raw) = std::fs::read_to_string(&path) {
+            parse_define_colors(&raw, &mut map);
+            log::debug!("gtk colors from {} ({} names)", path.display(), map.len());
+        }
+    }
+    map
+}
+
+fn gtk_css_candidates(is_dark: bool) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    let home = dirs::home_dir();
+    let theme = gsettings_string("org.gnome.desktop.interface", "gtk-theme");
+
+    // Base → theme package → user overrides last (later files win on insert).
+
+    // Stock Adwaita fallback (sparse; only used when nothing else defines a name).
+    if is_dark {
+        out.push(PathBuf::from("/usr/share/themes/Adwaita-dark/gtk-3.0/gtk.css"));
+    }
+    out.push(PathBuf::from("/usr/share/themes/Adwaita/gtk-3.0/gtk.css"));
+
+    // Active theme package (Dracula, ZorinBlue-Dark, …).
+    if let Some(name) = theme {
+        let name = name.trim().trim_matches('\'').to_string();
+        if !name.is_empty() {
+            let mut roots = Vec::new();
+            if let Some(ref h) = home {
+                roots.push(h.join(".local/share/themes").join(&name));
+                roots.push(h.join(".themes").join(&name));
+            }
+            roots.push(PathBuf::from("/usr/share/themes").join(&name));
+            roots.push(PathBuf::from("/usr/local/share/themes").join(&name));
+
+            for root in roots {
+                // Prefer the dark/light sheet that matches the session, then the
+                // generic gtk.css (many themes only ship one file).
+                if is_dark {
+                    out.push(root.join("gtk-4.0/gtk-dark.css"));
+                    out.push(root.join("gtk-3.0/gtk-dark.css"));
+                    out.push(root.join("gtk-3.20/gtk-dark.css"));
+                } else {
+                    out.push(root.join("gtk-4.0/gtk-light.css"));
+                    out.push(root.join("gtk-3.0/gtk-light.css"));
+                }
+                out.push(root.join("gtk-4.0/gtk.css"));
+                out.push(root.join("gtk-3.20/gtk.css"));
+                out.push(root.join("gtk-3.0/gtk.css"));
             }
         }
+    }
+
+    // User GTK CSS last so hand-tuned colours win.
+    if let Some(ref h) = home {
+        if is_dark {
+            out.push(h.join(".config/gtk-4.0/gtk-dark.css"));
+            out.push(h.join(".config/gtk-3.0/gtk-dark.css"));
+        } else {
+            out.push(h.join(".config/gtk-4.0/gtk-light.css"));
+        }
+        out.push(h.join(".config/gtk-4.0/gtk.css"));
+        out.push(h.join(".config/gtk-3.0/gtk.css"));
+    }
+    out
+}
+
+/// Parse `@define-color name value;` into the map (later files / later lines win).
+fn parse_define_colors(css: &str, map: &mut HashMap<String, String>) {
+    // Strip /* … */ comments so mid-line comments don't break values.
+    let mut cleaned = String::with_capacity(css.len());
+    let bytes = css.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if i + 1 < bytes.len() && bytes[i] == b'/' && bytes[i + 1] == b'*' {
+            i += 2;
+            while i + 1 < bytes.len() && !(bytes[i] == b'*' && bytes[i + 1] == b'/') {
+                i += 1;
+            }
+            i = (i + 2).min(bytes.len());
+            cleaned.push(' ');
+            continue;
+        }
+        cleaned.push(bytes[i] as char);
+        i += 1;
+    }
+
+    for line in cleaned.lines() {
+        let line = line.trim();
+        let Some(rest) = line.strip_prefix("@define-color") else {
+            continue;
+        };
+        let rest = rest.trim().trim_end_matches(';').trim();
+        let mut parts = rest.splitn(2, char::is_whitespace);
+        let Some(name) = parts.next() else { continue };
+        let Some(value) = parts.next() else { continue };
+        let name = name.trim().to_string();
+        let value = value.trim().to_string();
+        if !name.is_empty() && !value.is_empty() {
+            map.insert(name, value);
+        }
+    }
+}
+
+fn resolve_color(map: &HashMap<String, String>, names: &[&str]) -> Option<Color32> {
+    resolve_color_rgba(map, names).map(|(c, _)| c)
+}
+
+fn resolve_color_rgba(map: &HashMap<String, String>, names: &[&str]) -> Option<(Color32, f32)> {
+    for name in names {
+        if let Some(val) = map.get(*name) {
+            if let Some(c) = parse_css_color(val, map, 0) {
+                return Some(c);
+            }
+        }
+    }
+    None
+}
+
+fn parse_css_color(value: &str, map: &HashMap<String, String>, depth: u8) -> Option<(Color32, f32)> {
+    if depth > 12 {
+        return None;
+    }
+    let v = value.trim();
+    if v.eq_ignore_ascii_case("transparent") {
+        return Some((Color32::TRANSPARENT, 0.0));
+    }
+    // @other_name reference
+    if let Some(ref_name) = v.strip_prefix('@') {
+        let ref_name = ref_name.trim();
+        if let Some(next) = map.get(ref_name) {
+            return parse_css_color(next, map, depth + 1);
+        }
+        return None;
+    }
+    // shade(#abc, 1.2) / shade(@name, 0.9) — approximate
+    if let Some(inner) = v.strip_prefix("shade(").and_then(|s| s.strip_suffix(')')) {
+        let mut parts = inner.splitn(2, ',');
+        let color_s = parts.next()?.trim();
+        let factor: f32 = parts.next()?.trim().parse().ok()?;
+        let (c, a) = parse_css_color(color_s, map, depth + 1)?;
+        return Some((shade_color(c, factor), a));
+    }
+    // alpha(black, 0.35) / alpha(#fff, 0.1)
+    if let Some(inner) = v.strip_prefix("alpha(").and_then(|s| s.strip_suffix(')')) {
+        let mut parts = inner.splitn(2, ',');
+        let color_s = parts.next()?.trim();
+        let a: f32 = parts.next()?.trim().parse().ok()?;
+        let (c, _) = parse_css_color(color_s, map, depth + 1)?;
+        return Some((c, a.clamp(0.0, 1.0)));
+    }
+    // #rgb / #rrggbb / #rrggbbaa
+    if let Some(hex) = v.strip_prefix('#') {
+        return parse_hex(hex);
+    }
+    // rgb(r,g,b) / rgba(r,g,b,a)
+    if let Some(inner) = v
+        .strip_prefix("rgba(")
+        .or_else(|| v.strip_prefix("rgb("))
+        .and_then(|s| s.strip_suffix(')'))
+    {
+        let nums: Vec<&str> = inner.split(',').map(str::trim).collect();
+        if nums.len() >= 3 {
+            let r = parse_css_channel(nums[0])?;
+            let g = parse_css_channel(nums[1])?;
+            let b = parse_css_channel(nums[2])?;
+            let a = if nums.len() >= 4 {
+                nums[3].parse::<f32>().ok()?.clamp(0.0, 1.0)
+            } else {
+                1.0
+            };
+            return Some((Color32::from_rgb(r, g, b), a));
+        }
+    }
+    // Named CSS colors we might see
+    match v.to_ascii_lowercase().as_str() {
+        "black" => Some((Color32::BLACK, 1.0)),
+        "white" => Some((Color32::WHITE, 1.0)),
+        "red" => Some((Color32::from_rgb(255, 0, 0), 1.0)),
+        _ => None,
+    }
+}
+
+fn parse_css_channel(s: &str) -> Option<u8> {
+    if let Some(p) = s.strip_suffix('%') {
+        let f: f32 = p.parse().ok()?;
+        return Some((f.clamp(0.0, 100.0) / 100.0 * 255.0).round() as u8);
+    }
+    // 0–1 float or 0–255 int
+    if s.contains('.') {
+        let f: f32 = s.parse().ok()?;
+        if f <= 1.0 {
+            return Some((f.clamp(0.0, 1.0) * 255.0).round() as u8);
+        }
+        return Some(f.clamp(0.0, 255.0).round() as u8);
+    }
+    s.parse().ok()
+}
+
+fn parse_hex(hex: &str) -> Option<(Color32, f32)> {
+    let hex = hex.trim();
+    match hex.len() {
+        3 => {
+            let r = u8::from_str_radix(&hex[0..1].repeat(2), 16).ok()?;
+            let g = u8::from_str_radix(&hex[1..2].repeat(2), 16).ok()?;
+            let b = u8::from_str_radix(&hex[2..3].repeat(2), 16).ok()?;
+            Some((Color32::from_rgb(r, g, b), 1.0))
+        }
+        6 => {
+            let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
+            let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
+            let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+            Some((Color32::from_rgb(r, g, b), 1.0))
+        }
+        8 => {
+            let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
+            let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
+            let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+            let a = u8::from_str_radix(&hex[6..8], 16).ok()?;
+            Some((Color32::from_rgb(r, g, b), a as f32 / 255.0))
+        }
+        _ => None,
+    }
+}
+
+fn blend_over(fg: Color32, a: f32, bg: Color32) -> Color32 {
+    let a = a.clamp(0.0, 1.0);
+    let inv = 1.0 - a;
+    Color32::from_rgb(
+        (fg.r() as f32 * a + bg.r() as f32 * inv).round() as u8,
+        (fg.g() as f32 * a + bg.g() as f32 * inv).round() as u8,
+        (fg.b() as f32 * a + bg.b() as f32 * inv).round() as u8,
+    )
+}
+
+fn mix(a: Color32, b: Color32, t: f32) -> Color32 {
+    let t = t.clamp(0.0, 1.0);
+    Color32::from_rgb(
+        (a.r() as f32 * t + b.r() as f32 * (1.0 - t)).round() as u8,
+        (a.g() as f32 * t + b.g() as f32 * (1.0 - t)).round() as u8,
+        (a.b() as f32 * t + b.b() as f32 * (1.0 - t)).round() as u8,
+    )
+}
+
+fn lighten(c: Color32, amount: f32) -> Color32 {
+    mix(Color32::WHITE, c, amount)
+}
+
+fn darken(c: Color32, amount: f32) -> Color32 {
+    mix(Color32::BLACK, c, amount)
+}
+
+/// GTK `shade(color, k)`: k>1 lightens, k<1 darkens (rough HSL-L scale).
+fn shade_color(c: Color32, factor: f32) -> Color32 {
+    if (factor - 1.0).abs() < 0.001 {
+        return c;
+    }
+    if factor > 1.0 {
+        lighten(c, ((factor - 1.0) * 0.5).clamp(0.0, 0.9))
+    } else {
+        darken(c, ((1.0 - factor) * 0.6).clamp(0.0, 0.9))
+    }
+}
+
+fn contrast_fg(bg: Color32) -> Color32 {
+    // Relative luminance
+    let l = 0.2126 * bg.r() as f32 + 0.7152 * bg.g() as f32 + 0.0722 * bg.b() as f32;
+    if l > 140.0 {
+        Color32::from_rgb(0x1e, 0x1e, 0x1e)
+    } else {
+        Color32::WHITE
     }
 }
 
 fn system_prefers_dark() -> bool {
-    // org.gnome.desktop.interface color-scheme: prefer-dark | prefer-light | default
-    if let Ok(out) = Command::new("gsettings")
-        .args(["get", "org.gnome.desktop.interface", "color-scheme"])
-        .output()
-    {
-        if out.status.success() {
-            let s = String::from_utf8_lossy(&out.stdout).to_lowercase();
-            if s.contains("prefer-dark") {
-                return true;
-            }
-            if s.contains("prefer-light") {
-                return false;
-            }
+    if let Some(s) = gsettings_string("org.gnome.desktop.interface", "color-scheme") {
+        let s = s.to_lowercase();
+        if s.contains("prefer-dark") {
+            return true;
+        }
+        if s.contains("prefer-light") {
+            return false;
         }
     }
-    // Fallback: gtk-theme name often ends in -dark / -Dark
-    if let Ok(out) = Command::new("gsettings")
-        .args(["get", "org.gnome.desktop.interface", "gtk-theme"])
-        .output()
-    {
-        if out.status.success() {
-            let s = String::from_utf8_lossy(&out.stdout).to_lowercase();
-            if s.contains("dark") || s.contains("dracula") {
-                return true;
-            }
+    if let Some(s) = gsettings_string("org.gnome.desktop.interface", "gtk-theme") {
+        let s = s.to_lowercase();
+        if s.contains("dark") || s.contains("dracula") || s.contains("night") {
+            return true;
+        }
+        if s.contains("light") {
+            return false;
         }
     }
-    // Safe default for always-on-top overlays on desktop photos
     true
 }
 
-/// Map GNOME accent-color names → Adwaita palette.
-fn system_accent() -> Color32 {
-    let name = Command::new("gsettings")
-        .args(["get", "org.gnome.desktop.interface", "accent-color"])
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().trim_matches('\'').to_lowercase())
-        .unwrap_or_default();
-
+fn system_accent_gsettings() -> Color32 {
+    let name = gsettings_string("org.gnome.desktop.interface", "accent-color")
+        .unwrap_or_default()
+        .trim()
+        .trim_matches('\'')
+        .to_lowercase();
     match name.as_str() {
         "teal" => Color32::from_rgb(0x21, 0x90, 0xa4),
         "green" => Color32::from_rgb(0x3a, 0x94, 0x4a),
@@ -124,25 +459,309 @@ fn system_accent() -> Color32 {
         "pink" => Color32::from_rgb(0xd5, 0x61, 0x99),
         "purple" => Color32::from_rgb(0x91, 0x41, 0xac),
         "slate" => Color32::from_rgb(0x6f, 0x83, 0x96),
-        // "blue" or unknown
         _ => Color32::from_rgb(0x35, 0x84, 0xe4),
     }
 }
 
-/// Floating, always-on-top, undecorated popup (GNOME-style launcher / popover).
+fn gsettings_string(schema: &str, key: &str) -> Option<String> {
+    let out = Command::new("gsettings")
+        .args(["get", schema, key])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if s.is_empty() {
+        None
+    } else {
+        Some(s)
+    }
+}
+
+#[cfg(test)]
+mod theme_tests {
+    use super::*;
+
+    #[test]
+    fn parse_hex_and_rgba() {
+        let map = HashMap::new();
+        let (c, a) = parse_css_color("#1e1f29", &map, 0).unwrap();
+        assert_eq!(c, Color32::from_rgb(0x1e, 0x1f, 0x29));
+        assert!((a - 1.0).abs() < 0.01);
+        let (c, a) = parse_css_color("rgba(189, 147, 249, 0.5)", &map, 0).unwrap();
+        assert_eq!(c, Color32::from_rgb(189, 147, 249));
+        assert!((a - 0.5).abs() < 0.01);
+    }
+
+    #[test]
+    fn resolve_at_refs() {
+        let mut map = HashMap::new();
+        map.insert("bg_color".into(), "#1e1f29".into());
+        map.insert("theme_bg_color".into(), "@bg_color".into());
+        let c = resolve_color(&map, &["theme_bg_color"]).unwrap();
+        assert_eq!(c, Color32::from_rgb(0x1e, 0x1f, 0x29));
+    }
+
+    #[test]
+    fn parse_define_color_block() {
+        let css = r#"
+@define-color bg_color #1e1f29;
+@define-color theme_bg_color @bg_color;
+/*@define-color selected_bg_color #00b0ff;*/
+@define-color selected_bg_color #ff79c6;
+"#;
+        let mut map = HashMap::new();
+        parse_define_colors(css, &mut map);
+        assert_eq!(map.get("bg_color").map(String::as_str), Some("#1e1f29"));
+        assert_eq!(
+            map.get("selected_bg_color").map(String::as_str),
+            Some("#ff79c6")
+        );
+    }
+
+    #[test]
+    fn system_palette_loads() {
+        // Smoke: must not panic; on a GNOME/Zorin box with a theme installed
+        // we should get non-default text contrast (fg != pure black and bg).
+        let p = load_system_palette();
+        assert!(p.text != p.bg, "text and bg must differ");
+    }
+
+    #[test]
+    fn parse_monitor_geom() {
+        let line = " 0: +*DP-5 2560/700x1440/390+1440+581  DP-5";
+        let g = parse_xrandr_geom(line).expect("geom");
+        assert_eq!(g, (1440, 581, 2560, 1440));
+        let q = "DP-5 connected primary 2560x1440+1440+581 (normal left inverted right x axis y axis)";
+        let g = parse_xrandr_query_line(q).expect("query");
+        assert_eq!(g, (1440, 581, 2560, 1440));
+    }
+}
+
+/// Floating quick-access popup (emoji / clipboard) — like 1Password Quick Access.
+///
+/// - Undecorated, always-on-top, no taskbar entry
+/// - X11 `Utility` type so tiling WMs / GNOME extensions usually leave it floating
+/// - Centered on the **monitor under the pointer** (not always the primary)
 ///
 /// Opaque fill (not transparent): Wayland/GNOME + wgpu often draws a broken
 /// empty surface when `with_transparent(true)` is combined with a nested card.
 pub fn native_options(title: &str, width: f32, height: f32) -> eframe::NativeOptions {
     let mut viewport = egui::ViewportBuilder::default()
         .with_title(title)
-        .with_app_id("timbits")
+        // Distinct app id so compositors/tilers can match picker windows.
+        .with_app_id("timbits.picker")
         .with_inner_size([width, height])
-        .with_min_inner_size([360.0, 240.0])
+        .with_min_inner_size([320.0, 200.0])
+        .with_max_inner_size([width * 1.5, height * 1.5])
         .with_decorations(false)
         .with_transparent(false)
         .with_taskbar(false)
         .with_window_level(egui::WindowLevel::AlwaysOnTop)
+        // Utility/Dialog: typically excluded from auto-tile / window snapping.
+        .with_window_type(egui::X11WindowType::Utility)
+        .with_resizable(true);
+
+    // Center on the screen that currently has the cursor (multi-monitor).
+    // eframe's `centered: true` only uses the primary monitor and ignores its
+    // offset — wrong on setups where primary is not at (0,0).
+    if let Some(pos) = center_on_pointer_monitor(width, height) {
+        viewport = viewport.with_position(pos);
+    }
+
+    if let Ok(icon) = eframe::icon_data::from_png_bytes(LOGO_PNG) {
+        viewport = viewport.with_icon(Arc::new(icon));
+    }
+
+    eframe::NativeOptions {
+        viewport,
+        // We set position ourselves for the correct monitor.
+        centered: false,
+        ..Default::default()
+    }
+}
+
+/// Re-apply centering after the window is mapped (Wayland/Mutter often ignores
+/// pre-map `OuterPosition`). Call once from the picker’s first `ui` frame.
+pub fn reapply_pointer_monitor_center(ctx: &egui::Context, width: f32, height: f32) {
+    if let Some(pos) = center_on_pointer_monitor(width, height) {
+        ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(pos));
+    }
+}
+
+/// Top-left outer position so a `width`×`height` window is centered on the
+/// monitor that contains the mouse pointer.
+pub fn center_on_pointer_monitor(width: f32, height: f32) -> Option<egui::Pos2> {
+    let (px, py) = pointer_position()?;
+    let monitors = list_monitors();
+    if monitors.is_empty() {
+        return None;
+    }
+    let mon = monitors
+        .iter()
+        .find(|m| px >= m.x && px < m.x + m.w && py >= m.y && py < m.y + m.h)
+        .or_else(|| monitors.iter().find(|m| m.primary))
+        .unwrap_or(&monitors[0]);
+
+    // Clamp so the window stays fully on that monitor when possible.
+    let max_x = (mon.x + mon.w) as f32 - width;
+    let max_y = (mon.y + mon.h) as f32 - height;
+    let x = (mon.x as f32 + (mon.w as f32 - width) / 2.0)
+        .clamp(mon.x as f32, max_x.max(mon.x as f32));
+    let y = (mon.y as f32 + (mon.h as f32 - height) / 2.0)
+        .clamp(mon.y as f32, max_y.max(mon.y as f32));
+
+    log::debug!(
+        "center picker {width}x{height} on monitor {}+{} {}x{} (pointer {px},{py}) → ({x:.0},{y:.0})",
+        mon.x,
+        mon.y,
+        mon.w,
+        mon.h
+    );
+    Some(egui::pos2(x, y))
+}
+
+#[derive(Debug, Clone)]
+struct MonitorGeom {
+    x: i32,
+    y: i32,
+    w: i32,
+    h: i32,
+    primary: bool,
+}
+
+fn pointer_position() -> Option<(i32, i32)> {
+    // xdotool works on X11 and typically on GNOME XWayland for cursor coords.
+    let out = Command::new("xdotool")
+        .args(["getmouselocation", "--shell"])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let s = String::from_utf8_lossy(&out.stdout);
+    let mut x = None;
+    let mut y = None;
+    for line in s.lines() {
+        if let Some(v) = line.strip_prefix("X=") {
+            x = v.trim().parse().ok();
+        } else if let Some(v) = line.strip_prefix("Y=") {
+            y = v.trim().parse().ok();
+        }
+    }
+    Some((x?, y?))
+}
+
+fn list_monitors() -> Vec<MonitorGeom> {
+    // Prefer `xrandr --listmonitors` (compact, reliable on X11/XWayland).
+    if let Ok(out) = Command::new("xrandr").args(["--listmonitors"]).output() {
+        if out.status.success() {
+            let s = String::from_utf8_lossy(&out.stdout);
+            let mut mons = Vec::new();
+            // " 0: +*DP-5 2560/700x1440/390+1440+581  DP-5"
+            // " 1: +DP-1 1440/700x2560/390+0+0  DP-1"
+            for line in s.lines().skip(1) {
+                let primary = line.contains("*");
+                // Find "WxH+X+Y" with optional /mm parts: 2560/700x1440/390+1440+581
+                if let Some(geom) = parse_xrandr_geom(line) {
+                    mons.push(MonitorGeom {
+                        x: geom.0,
+                        y: geom.1,
+                        w: geom.2,
+                        h: geom.3,
+                        primary,
+                    });
+                }
+            }
+            if !mons.is_empty() {
+                return mons;
+            }
+        }
+    }
+
+    // Fallback: `xrandr --query`
+    if let Ok(out) = Command::new("xrandr").args(["--query"]).output() {
+        if out.status.success() {
+            let s = String::from_utf8_lossy(&out.stdout);
+            let mut mons = Vec::new();
+            for line in s.lines() {
+                if !line.contains(" connected") {
+                    continue;
+                }
+                let primary = line.contains(" primary ");
+                // "DP-5 connected primary 2560x1440+1440+581 ..."
+                if let Some(geom) = parse_xrandr_query_line(line) {
+                    mons.push(MonitorGeom {
+                        x: geom.0,
+                        y: geom.1,
+                        w: geom.2,
+                        h: geom.3,
+                        primary,
+                    });
+                }
+            }
+            return mons;
+        }
+    }
+    Vec::new()
+}
+
+/// Parse geometry from listmonitors: `2560/700x1440/390+1440+581` or `2560x1440+1440+581`.
+fn parse_xrandr_geom(line: &str) -> Option<(i32, i32, i32, i32)> {
+    // Find the last `+X+Y` and work backwards for WxH.
+    let plus = line.rfind('+')?;
+    let rest = &line[..plus];
+    let plus2 = rest.rfind('+')?;
+    let y: i32 = line[plus + 1..]
+        .split_whitespace()
+        .next()?
+        .parse()
+        .ok()?;
+    let x: i32 = rest[plus2 + 1..].parse().ok()?;
+    let before = &rest[..plus2];
+    // before ends with "WxH" possibly with /mm: "2560/700x1440/390"
+    let x_char = before.rfind('x')?;
+    let h_part = &before[x_char + 1..];
+    let h: i32 = h_part.split('/').next()?.parse().ok()?;
+    let w_part = before[..x_char].split_whitespace().last()?;
+    let w: i32 = w_part.split('/').next()?.parse().ok()?;
+    Some((x, y, w, h))
+}
+
+fn parse_xrandr_query_line(line: &str) -> Option<(i32, i32, i32, i32)> {
+    // Look for token like 2560x1440+1440+581
+    for tok in line.split_whitespace() {
+        if let Some((wh, rest)) = tok.split_once('+') {
+            if let Some((w, h)) = wh.split_once('x') {
+                if let (Ok(w), Ok(h)) = (w.parse::<i32>(), h.parse::<i32>()) {
+                    let mut parts = rest.split('+');
+                    if let (Some(xs), Some(ys)) = (parts.next(), parts.next()) {
+                        if let (Ok(x), Ok(y)) = (xs.parse::<i32>(), ys.parse::<i32>()) {
+                            return Some((x, y, w, h));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Normal app window with **real** GNOME/libadwaita decorations (title bar,
+/// close/min/max, themed by the desktop shell). Use for Settings and other
+/// persistent windows — not for transient pickers.
+pub fn app_window_options(title: &str, width: f32, height: f32) -> eframe::NativeOptions {
+    let mut viewport = egui::ViewportBuilder::default()
+        .with_title(title)
+        .with_app_id("timbits")
+        .with_inner_size([width, height])
+        .with_min_inner_size([420.0, 360.0])
+        // Let the compositor draw the real CSD/SSD title bar (GNOME Shell theme).
+        .with_decorations(true)
+        .with_transparent(false)
+        .with_taskbar(true)
+        .with_window_level(egui::WindowLevel::Normal)
         .with_resizable(true);
 
     if let Ok(icon) = eframe::icon_data::from_png_bytes(LOGO_PNG) {
@@ -184,7 +803,7 @@ pub fn apply_fonts(ctx: &egui::Context) {
     ctx.set_fonts(fonts);
 }
 
-/// Apply Adwaita-inspired visuals matching the system dark/light preference.
+/// Apply egui visuals from the live GTK theme palette.
 pub fn apply_theme(ctx: &egui::Context) {
     let p = Palette::current();
     let theme = if p.is_dark {
@@ -264,74 +883,16 @@ pub fn apply_theme(ctx: &egui::Context) {
     });
 }
 
-/// Full-window floating popup chrome: header + body that expands to fill.
+/// Full-window floating popup chrome for undecorated pickers (no title bar).
 ///
-/// Call from a CentralPanel (any frame). Content must use the remaining
-/// height (ScrollArea / expand) — the body gets `ui.available_size()` after
-/// the header so it cannot collapse to zero.
-pub fn floating_shell(
-    ui: &mut egui::Ui,
-    title: &str,
-    ctx: &egui::Context,
-    add_contents: impl FnOnce(&mut egui::Ui),
-) {
+/// Just theme fill + padding — close with Esc. Call from a CentralPanel.
+pub fn floating_shell(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui)) {
     let p = Palette::current();
 
-    // Paint solid surface (window is already opaque Adwaita bg).
     let full = ui.available_rect_before_wrap();
     ui.painter()
         .rect_filled(full, CornerRadius::same(12), p.bg);
 
-    // ── Header (drag to move) ──────────────────────────────────────────
-    // ASCII-only chrome: fancy bullets/arrows often missing from egui's default
-    // fonts and show up as empty tofu boxes (□).
-    let header = Frame::new()
-        .fill(p.bg_raised)
-        .inner_margin(Margin::symmetric(14, 10))
-        .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                // Simple drag affordance (three dots) drawn with the painter.
-                let (dot_rect, _) =
-                    ui.allocate_exact_size(Vec2::new(14.0, 16.0), Sense::hover());
-                let cx = dot_rect.center().x;
-                let cy = dot_rect.center().y;
-                for dy in [-4.0_f32, 0.0, 4.0] {
-                    ui.painter().circle_filled(
-                        egui::pos2(cx, cy + dy),
-                        1.6,
-                        p.text_muted,
-                    );
-                }
-                ui.add_space(4.0);
-                ui.label(RichText::new(title).size(14.0).color(p.text).strong());
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let close = ui
-                        .add_sized(
-                            [28.0, 24.0],
-                            egui::Button::new(
-                                RichText::new("X").size(13.0).color(p.text_muted).strong(),
-                            )
-                            .fill(Color32::TRANSPARENT)
-                            .stroke(Stroke::NONE),
-                        )
-                        .on_hover_text("Close (Esc)");
-                    if close.clicked() {
-                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                    }
-                });
-            });
-        });
-
-    let header_resp = header.response.interact(Sense::click_and_drag());
-    if header_resp.dragged() {
-        ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
-    }
-
-    // Separator
-    let (sep, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 1.0), Sense::hover());
-    ui.painter().rect_filled(sep, 0.0, p.border);
-
-    // ── Body: consume ALL remaining space ──────────────────────────────
     let body_size = ui.available_size();
     ui.allocate_ui_with_layout(
         body_size,
@@ -346,6 +907,27 @@ pub fn floating_shell(
                 });
         },
     );
+}
+
+/// Content area for a **decorated** app window (real GNOME title bar outside).
+///
+/// No fake header/close — the shell draws those. Body fills the window with
+/// Adwaita-matching padding and fill from the current palette.
+pub fn app_shell(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui)) {
+    let p = Palette::current();
+    let full = ui.available_rect_before_wrap();
+    ui.painter().rect_filled(full, CornerRadius::ZERO, p.bg);
+
+    let body_size = ui.available_size();
+    ui.allocate_ui_with_layout(body_size, egui::Layout::top_down(egui::Align::Min), |ui| {
+        Frame::new()
+            .fill(p.bg)
+            .inner_margin(Margin::symmetric(16, 14))
+            .show(ui, |ui| {
+                ui.set_min_size(ui.available_size());
+                add_contents(ui);
+            });
+    });
 }
 
 /// Search field chrome (inset entry, Adwaita style).

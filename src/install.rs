@@ -79,6 +79,27 @@ pub fn run() -> Result<()> {
         .arg(&apps)
         .status();
 
+    // Emoji catalogue for search (name/group/keywords). Always refresh so
+    // upgrades pick up new Unicode versions and keyword data.
+    let emoji_db_dest = config::emojis_json_path();
+    let bundled = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/emojis.json");
+    if bundled.is_file() {
+        let existed = emoji_db_dest.exists();
+        if let Err(e) = fs::copy(&bundled, &emoji_db_dest) {
+            println!("Warning: could not install emojis.json: {e}");
+        } else if existed {
+            println!("Emoji database updated: {}", emoji_db_dest.display());
+        } else {
+            println!("Emoji database: {}", emoji_db_dest.display());
+        }
+        // Optional version stamp for support / debugging.
+        let ver_src = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/emojis.version");
+        if ver_src.is_file() {
+            let ver_dest = config::data_dir().join("emojis.version");
+            let _ = fs::copy(&ver_src, &ver_dest);
+        }
+    }
+
     // GNOME/Zorin: wire hotkeys automatically when gsettings is available.
     let gnome_ok = match gnome_hotkeys::install(&cfg) {
         Ok(true) => true,

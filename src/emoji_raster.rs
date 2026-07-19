@@ -110,22 +110,48 @@ fn raster_emoji(emoji: &str) -> Option<ColorImage> {
     let data = font_bytes()?;
     let face = ttf_parser::Face::parse(data, 0).ok()?;
 
-    // Prefer the first codepoint that has a colour strike. For simple emoji
-    // this is the only char; for ZWJ sequences Noto often still maps the
-    // base character (full ligature shaping would need harfbuzz).
+    // Shape the full cluster (flags, ZWJ, skin tones) so we get the ligature
+    // glyph id — per-codepoint lookup only shows regional-indicator letters
+    // or the uncombined base.
+    if let Some(img) = raster_shaped(emoji, data, &face) {
+        return Some(img);
+    }
+
+    // Fallback: first/last codepoint with a colour strike (simple emoji).
     let mut last_img = None;
     for ch in emoji.chars() {
         if ch == '\u{FE0F}' || ch == '\u{FE0E}' || ch == '\u{200D}' {
-            continue; // variation selectors / ZWJ
+            continue;
         }
         if let Some(gid) = face.glyph_index(ch) {
             if let Some(raster) = face.glyph_raster_image(gid, STRIKE_PX) {
                 if let Some(img) = raster_to_color_image(&raster) {
                     last_img = Some(img);
-                    // Keep going: later codepoints in a sequence sometimes
-                    // replace the base (skin tones etc. may not work without
-                    // shaping, but multi-person ZWJ often still show the base).
                 }
+            }
+        }
+    }
+    last_img
+}
+
+/// Use rustybuzz (HarfBuzz) to resolve multi-codepoint sequences to glyph ids.
+fn raster_shaped(
+    emoji: &str,
+    data: &[u8],
+    face: &ttf_parser::Face<'_>,
+) -> Option<ColorImage> {
+    let hb_face = rustybuzz::Face::from_slice(data, 0)?;
+    let mut buf = rustybuzz::UnicodeBuffer::new();
+    buf.push_str(emoji);
+    let glyphs = rustybuzz::shape(&hb_face, &[], buf);
+
+    // Prefer the last rasterizable glyph (ligatures often replace earlier slots).
+    let mut last_img = None;
+    for info in glyphs.glyph_infos() {
+        let gid = ttf_parser::GlyphId(info.glyph_id as u16);
+        if let Some(raster) = face.glyph_raster_image(gid, STRIKE_PX) {
+            if let Some(img) = raster_to_color_image(&raster) {
+                last_img = Some(img);
             }
         }
     }
@@ -187,5 +213,20 @@ mod tests {
         // Don't fail CI without the font; just exercise the path list.
         let paths = super::color_emoji_font_paths();
         assert!(!paths.is_empty());
+    }
+
+    #[test]
+    fn shapes_canada_flag_when_font_present() {
+        // Requires fonts-noto-color-emoji; skip silently if missing.
+        if super::font_bytes().is_none() {
+            return;
+        }
+        let img = super::raster_emoji("🇨🇦");
+        assert!(
+            img.is_some(),
+            "🇨🇦 should rasterize via rustybuzz ligature shaping"
+        );
+        let img = img.unwrap();
+        assert!(img.width() > 8 && img.height() > 8);
     }
 }

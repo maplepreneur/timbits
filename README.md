@@ -6,13 +6,17 @@ on other distros). Named after the Tim Hortons donut holes.
 ## Features
 
 - **Emoji picker** — opens with the cursor in the search box. Type to search
-  ~1900 emojis by name/keyword, move with the arrow keys, hit **Enter** and the
-  emoji is pasted right where your cursor was. Remembers recent picks.
+  the full Unicode emoji set (Emoji 17, fully-qualified) by name or keyword
+  (e.g. `canada`, `canadian flag`, `lol`, `coffee`), browse by category chip,
+  move with the arrow keys, hit **Enter** and the emoji is pasted right where
+  your cursor was. Remembers recent picks.
 - **Clipboard history** — stores text, file copies (uri-list) and images
   (screenshots). Search filters everything, including **text inside images
   and image files** via OCR (tesseract). Arrow keys to navigate, **Enter**
   pastes into the previously focused window, **Ctrl+Delete** forgets an entry.
 - **Hotkeys** — set your own (default `Super+.` emoji, `Super+Shift+C` history).
+- **Emoji skin tone** — in Settings, pick a preferred tone (default: none). The
+  picker lists each emoji once and pastes hands/people in your preferred tone.
 
 ## Install
 
@@ -31,7 +35,13 @@ Requirements:
   (`ydotool`; socket often `/tmp/.ydotool_socket`). `wtype` is not supported on
   GNOME. On X11, `xdotool`/`enigo` work.
 - **Colour emoji**: system `fonts-noto-color-emoji` (Noto Color Emoji)
+- **Emoji search data**: bundled `emojis.json` (Unicode Emoji 17 fully-qualified
+  set + emojilib-style keywords) plus built-in aliases; optional
+  `~/.config/timbits/emoji_aliases.toml`. Refresh the catalogue with
+  **Settings → Update emoji catalogue**, or `timbits update-emojis` (network).
+  Dev shipping builds: `cargo run --bin update-emojis` then rebuild.
 - **Optional, for image OCR**: `sudo apt install tesseract-ocr`
+- **No Python required** for the app (paste is pure Rust)
 
 ## Hotkey setup
 
