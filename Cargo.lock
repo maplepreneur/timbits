@@ -3465,7 +3465,6 @@ dependencies = [
  "env_logger",
  "global-hotkey",
  "image",
- "libc",
  "log",
  "rusqlite",
  "seahash",

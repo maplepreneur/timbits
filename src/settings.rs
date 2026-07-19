@@ -217,15 +217,7 @@ impl eframe::App for SettingsApp {
                     ui.add_space(8.0);
                     ui.separator();
                     ui.add_space(6.0);
-                    ui_common::muted_label(ui, "Shortcuts while pickers are open:");
-                    ui.horizontal(|ui| {
-                        ui_common::keycap(ui, "Enter");
-                        ui_common::muted_label(ui, "paste");
-                        ui_common::keycap(ui, "Esc");
-                        ui_common::muted_label(ui, "close");
-                        ui_common::keycap(ui, "↑↓");
-                        ui_common::muted_label(ui, "navigate");
-                    });
+                    ui_common::footer_hints(ui, "Pickers:");
                 });
             });
     }

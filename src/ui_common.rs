@@ -283,20 +283,36 @@ pub fn floating_shell(
         .rect_filled(full, CornerRadius::same(12), p.bg);
 
     // ── Header (drag to move) ──────────────────────────────────────────
+    // ASCII-only chrome: fancy bullets/arrows often missing from egui's default
+    // fonts and show up as empty tofu boxes (□).
     let header = Frame::new()
         .fill(p.bg_raised)
         .inner_margin(Margin::symmetric(14, 10))
         .show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.label(RichText::new("●").size(10.0).color(p.text_muted));
+                // Simple drag affordance (three dots) drawn with the painter.
+                let (dot_rect, _) =
+                    ui.allocate_exact_size(Vec2::new(14.0, 16.0), Sense::hover());
+                let cx = dot_rect.center().x;
+                let cy = dot_rect.center().y;
+                for dy in [-4.0_f32, 0.0, 4.0] {
+                    ui.painter().circle_filled(
+                        egui::pos2(cx, cy + dy),
+                        1.6,
+                        p.text_muted,
+                    );
+                }
+                ui.add_space(4.0);
                 ui.label(RichText::new(title).size(14.0).color(p.text).strong());
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let close = ui
                         .add_sized(
                             [28.0, 24.0],
-                            egui::Button::new(RichText::new("x").size(14.0).color(p.text_muted))
-                                .fill(Color32::TRANSPARENT)
-                                .stroke(Stroke::NONE),
+                            egui::Button::new(
+                                RichText::new("X").size(13.0).color(p.text_muted).strong(),
+                            )
+                            .fill(Color32::TRANSPARENT)
+                            .stroke(Stroke::NONE),
                         )
                         .on_hover_text("Close (Esc)");
                     if close.clicked() {
@@ -367,7 +383,8 @@ pub fn preview_frame() -> Frame {
         .stroke(Stroke::new(1.0, p.border))
 }
 
-/// Small keycap-style label for footers.
+/// Small keycap-style label for footers. Prefer plain ASCII in `label`
+/// (arrows/emoji often render as □ with default fonts).
 pub fn keycap(ui: &mut egui::Ui, label: &str) {
     let p = Palette::current();
     Frame::new()
@@ -379,7 +396,7 @@ pub fn keycap(ui: &mut egui::Ui, label: &str) {
             ui.label(
                 RichText::new(label)
                     .size(11.0)
-                    .color(p.text_muted)
+                    .color(p.text)
                     .strong(),
             );
         });
@@ -388,6 +405,21 @@ pub fn keycap(ui: &mut egui::Ui, label: &str) {
 pub fn muted_label(ui: &mut egui::Ui, text: impl Into<String>) {
     let p = Palette::current();
     ui.label(RichText::new(text.into()).size(12.0).color(p.text_muted));
+}
+
+/// Compact footer hint line using only ASCII (no missing-glyph boxes).
+pub fn footer_hints(ui: &mut egui::Ui, left: &str) {
+    let p = Palette::current();
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(left).size(12.0).color(p.text_muted));
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.label(
+                RichText::new("Arrows move  ·  Enter paste  ·  Esc close")
+                    .size(11.0)
+                    .color(p.text_muted),
+            );
+        });
+    });
 }
 
 pub fn kind_icon(kind: EntryKind) -> &'static str {

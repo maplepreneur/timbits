@@ -32,12 +32,11 @@ One binary, subcommands dispatched in `src/main.rs`:
 
 ## Key design decisions (don't regress these!)
 
-1. **Emoji paste (proven path)**: Super+. / Super+E run
-   `dotfiles/Zorin/keyd/emoji-picker.sh` → GTK4 picker (`emoji-picker.py`,
-   Noto Color Emoji) → `wl-copy` → sleep 350 ms → `ydotool key super+v`
-   (or `ctrl+shift+v` in terminals) → fallback `inject-paste.py`.
-   Do **not** use `ydotool type` for emoji (exits 0, injects nothing).
-   Clipboard history paste uses the same Super+V chord.
+1. **Paste (proven path)**: `scripts/paste_helper.py` ports emoji-picker.sh +
+   inject-paste.py. Flow: `wl-copy` → sleep 350 ms → `ydotool key super+v`
+   (or `ctrl+shift+v` in terminals via keyd-last-focus) → uinput fallback.
+   Timbits emoji/clipboard UIs call this after focus restore. Do **not** use
+   `ydotool type` for emoji.
 2. **Emoji font**: egui/ab_glyph cannot rasterize color CBDT fonts (Noto Color
    Emoji). We bundle monochrome `assets/NotoEmoji.ttf` (variable font from
    google/fonts, ~2 MB) and register it as a fallback family in

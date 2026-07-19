@@ -174,10 +174,10 @@ impl eframe::App for HistoryApp {
                     // Search
                     ui_common::search_frame().show(ui, |ui| {
                         ui.horizontal(|ui| {
-                            ui.label(RichText::new("🔍").size(15.0).color(p.text_muted));
+                            ui.label(RichText::new("Search").size(12.0).color(p.text_muted));
                             let resp = ui.add(
                                 egui::TextEdit::singleline(&mut self.search)
-                                    .hint_text("Search history (OCR text included)…")
+                                    .hint_text("Filter history (OCR included)…")
                                     .font(egui::TextStyle::Heading)
                                     .frame(egui::Frame::NONE)
                                     .desired_width(f32::INFINITY),
@@ -481,22 +481,13 @@ impl eframe::App for HistoryApp {
                     });
 
                     ui.add_space(4.0);
-                    ui.horizontal(|ui| {
-                        ui_common::keycap(ui, "↑↓");
-                        ui_common::muted_label(ui, "navigate");
-                        ui_common::keycap(ui, "Enter");
-                        ui_common::muted_label(ui, "paste");
-                        ui_common::keycap(ui, "Ctrl+Del");
-                        ui_common::muted_label(ui, "forget");
-                        ui_common::keycap(ui, "Esc");
-                        ui_common::muted_label(ui, "close");
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            ui_common::muted_label(
-                                ui,
-                                format!("{} items", self.entries.len()),
-                            );
-                        });
-                    });
+                    ui_common::footer_hints(
+                        ui,
+                        &format!(
+                            "{} items  ·  Ctrl+Del forget",
+                            self.entries.len()
+                        ),
+                    );
                 });
             });
 

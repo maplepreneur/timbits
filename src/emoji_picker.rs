@@ -214,10 +214,10 @@ impl eframe::App for EmojiApp {
                     // Search
                     ui_common::search_frame().show(ui, |ui| {
                         ui.horizontal(|ui| {
-                            ui.label(RichText::new("🔍").size(15.0).color(p.text_muted));
+                            ui.label(RichText::new("Search").size(12.0).color(p.text_muted));
                             let resp = ui.add(
                                 egui::TextEdit::singleline(&mut self.search)
-                                    .hint_text("Search emojis…")
+                                    .hint_text("Type to filter…")
                                     .font(egui::TextStyle::Heading)
                                     .frame(egui::Frame::NONE)
                                     .desired_width(f32::INFINITY),
@@ -307,7 +307,7 @@ impl eframe::App for EmojiApp {
                         });
 
                     ui.add_space(6.0);
-                    // Footer status
+                    // Footer: selection preview + clean ASCII hints (no tofu boxes).
                     ui.horizontal(|ui| {
                         if let Some(s) = self.shown.get(self.selected) {
                             let text = s.text.clone();
@@ -317,14 +317,12 @@ impl eframe::App for EmojiApp {
                                 ui.add(
                                     egui::Image::new(egui::load::SizedTexture::new(
                                         tex.id(),
-                                        Vec2::splat(32.0),
+                                        Vec2::splat(28.0),
                                     ))
                                     .sense(Sense::hover()),
                                 );
-                            } else {
-                                ui.label(RichText::new(&text).size(26.0));
                             }
-                            ui.add_space(4.0);
+                            ui.add_space(6.0);
                             ui.vertical(|ui| {
                                 ui.label(
                                     RichText::new(&name)
@@ -332,29 +330,36 @@ impl eframe::App for EmojiApp {
                                         .color(p.text)
                                         .strong(),
                                 );
-                                if recent {
+                                ui.horizontal(|ui| {
+                                    if recent {
+                                        ui.label(
+                                            RichText::new("Recent")
+                                                .size(11.0)
+                                                .color(p.accent),
+                                        );
+                                        ui.label(
+                                            RichText::new("·")
+                                                .size(11.0)
+                                                .color(p.text_muted),
+                                        );
+                                    }
                                     ui.label(
-                                        RichText::new("Recent")
+                                        RichText::new(format!("{} emojis", self.shown.len()))
                                             .size(11.0)
-                                            .color(p.accent),
+                                            .color(p.text_muted),
                                     );
-                                }
+                                });
                             });
-                            ui.separator();
+                        } else {
+                            ui.label(
+                                RichText::new(format!("{} emojis", self.shown.len()))
+                                    .size(12.0)
+                                    .color(p.text_muted),
+                            );
                         }
-                        ui_common::muted_label(ui, format!("{} emojis", self.shown.len()));
-                        ui.with_layout(
-                            egui::Layout::right_to_left(egui::Align::Center),
-                            |ui| {
-                                ui_common::keycap(ui, "Esc");
-                                ui_common::muted_label(ui, "close");
-                                ui_common::keycap(ui, "Enter");
-                                ui_common::muted_label(ui, "paste");
-                                ui_common::keycap(ui, "↑↓←→");
-                                ui_common::muted_label(ui, "move");
-                            },
-                        );
                     });
+                    ui.add_space(4.0);
+                    ui_common::footer_hints(ui, "");
                 });
             });
 
