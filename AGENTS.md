@@ -24,16 +24,20 @@ One binary, subcommands dispatched in `src/main.rs`:
 | `daemon.rs` | Clipboard poll loop (700 ms) + X11 global hotkeys (global-hotkey crate) + hotkey string parser |
 | `emoji_picker.rs` | egui emoji grid: search-first, arrow-key nav, Enter pastes, recents file |
 | `history_picker.rs` | egui history list + preview pane; ingests clipboard on open (focused-window read works on GNOME Wayland) |
-| `ui_common.rs` | Shared egui setup: window options, bundled emoji font, misc helpers |
+| `ui_common.rs` | Floating undecorated pickers; Adwaita-like theme from GNOME color-scheme/accent |
+| `emoji_raster.rs` | Colour emoji textures from system NotoColorEmoji (ttf-parser CBDT/PNG) |
+| `settings.rs` | Preferences UI (hotkeys, OCR, max entries); app-menu launcher target |
 | `install.rs` | `timbits install`: default config, autostart, launcher entries, GNOME hotkeys |
-| `gnome_hotkeys.rs` | GNOME/Zorin custom keybindings via `gsettings` (Wayland hotkeys) |
+| `gnome_hotkeys.rs` | GNOME/Zorin custom keybindings via `gsettings`; clears IBus Super+. conflict |
 
 ## Key design decisions (don't regress these!)
 
-1. **Paste persistence**: on both X11 and Wayland the clipboard selection dies
-   with its owner. The picker therefore spawns `timbits __serve-clip <kind>`
-   which claims the selection with arboard's `set().wait()` and blocks until
-   replaced. Never set the clipboard in the picker process right before exit.
+1. **Emoji paste (proven path)**: Super+. / Super+E run
+   `dotfiles/Zorin/keyd/emoji-picker.sh` → GTK4 picker (`emoji-picker.py`,
+   Noto Color Emoji) → `wl-copy` → sleep 350 ms → `ydotool key super+v`
+   (or `ctrl+shift+v` in terminals) → fallback `inject-paste.py`.
+   Do **not** use `ydotool type` for emoji (exits 0, injects nothing).
+   Clipboard history paste uses the same Super+V chord.
 2. **Emoji font**: egui/ab_glyph cannot rasterize color CBDT fonts (Noto Color
    Emoji). We bundle monochrome `assets/NotoEmoji.ttf` (variable font from
    google/fonts, ~2 MB) and register it as a fallback family in

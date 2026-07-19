@@ -46,7 +46,7 @@ pub fn run() -> Result<()> {
         autostart.join("timbits.desktop").display()
     );
 
-    // Single app-menu launcher (emoji/clipboard are opened via hotkeys).
+    // Single app-menu launcher → settings (emoji/clipboard are hotkey-driven).
     let apps = dirs::data_dir()
         .unwrap_or_else(|| config::data_dir())
         .join("applications");
@@ -63,8 +63,8 @@ pub fn run() -> Result<()> {
         apps.join("timbits.desktop"),
         desktop_entry(
             "Timbits",
-            "Emoji picker and clipboard history",
-            &format!("{exe_s} clipboard"),
+            "Emoji picker, clipboard history, and settings",
+            &format!("{exe_s} settings"),
             true,
         ),
     )?;

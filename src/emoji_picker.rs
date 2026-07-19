@@ -2,19 +2,25 @@
 //! over a grid, Enter to paste, Esc to cancel.
 
 use anyhow::Result;
-use eframe::egui;
+use eframe::egui::{self, Color32, CornerRadius, RichText, Sense, Stroke, Vec2};
 use std::sync::{Arc, Mutex};
 
 use crate::config;
-use crate::ui_common;
+use crate::emoji_raster::EmojiAtlas;
+use crate::ui_common::{self, Palette};
 
 const COLS: usize = 10;
 const MAX_SHOWN: usize = 500;
 const MAX_RECENTS: usize = 20;
+const CELL: f32 = 42.0;
+const EMOJI_SIZE: f32 = 24.0;
+const EMOJI_IMG: f32 = 28.0;
 
 struct Shown {
     text: String,
     name: String,
+    /// True when this row is a recent pick (search empty).
+    recent: bool,
 }
 
 struct EmojiApp {
@@ -22,11 +28,14 @@ struct EmojiApp {
     /// (emoji, display name, lowercase search key)
     all: Vec<(&'static str, String, String)>,
     shown: Vec<Shown>,
+    /// How many leading items are recents (for section header).
+    recent_count: usize,
     selected: usize,
     chosen: Arc<Mutex<Option<String>>>,
     /// Selection moved via keyboard this frame → scroll it into view.
     moved: bool,
     focused_once: bool,
+    atlas: EmojiAtlas,
 }
 
 impl EmojiApp {
@@ -47,10 +56,12 @@ impl EmojiApp {
             search: String::new(),
             all,
             shown: Vec::new(),
+            recent_count: 0,
             selected: 0,
             chosen,
             moved: false,
             focused_once: false,
+            atlas: EmojiAtlas::new(),
         };
         app.refilter();
         app
@@ -78,9 +89,9 @@ impl EmojiApp {
         let words: Vec<&str> = query.split_whitespace().collect();
         let mut shown: Vec<Shown> = Vec::new();
         let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut recent_count = 0;
 
         if words.is_empty() {
-            // Recent emojis first when nothing is typed (deduped against the full list below).
             for recent in Self::load_recents() {
                 if !seen.insert(recent.clone()) {
                     continue;
@@ -94,7 +105,9 @@ impl EmojiApp {
                 shown.push(Shown {
                     text: recent,
                     name,
+                    recent: true,
                 });
+                recent_count += 1;
             }
         }
 
@@ -111,10 +124,12 @@ impl EmojiApp {
             shown.push(Shown {
                 text: (*emoji).to_string(),
                 name: name.clone(),
+                recent: false,
             });
         }
 
         self.shown = shown;
+        self.recent_count = recent_count;
         self.selected = 0;
         self.moved = true;
     }
@@ -132,9 +147,15 @@ impl EmojiApp {
 }
 
 impl eframe::App for EmojiApp {
+    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
+        ui_common::clear_color_for_theme()
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         let ctx = &ctx;
+        let p = Palette::current();
+
         // Grab key state before any widget can consume the events.
         let (esc, enter, up, down, left, right) = ctx.input(|i| {
             (
@@ -186,82 +207,228 @@ impl eframe::App for EmojiApp {
             }
         }
 
-        egui::Panel::top("search").show(ui, |ui| {
-            ui.add_space(8.0);
-            let resp = ui.add(
-                egui::TextEdit::singleline(&mut self.search)
-                    .hint_text("Search emojis…  (↑↓←→ navigate, Enter pastes, Esc closes)")
-                    .font(egui::TextStyle::Heading)
-                    .desired_width(f32::INFINITY),
-            );
-            if !self.focused_once {
-                resp.request_focus();
-                self.focused_once = true;
-            }
-            if resp.changed() {
-                self.refilter();
-            }
-            ui.add_space(4.0);
-        });
-
-        egui::Panel::bottom("status").show(ui, |ui| {
-            ui.add_space(4.0);
-            ui.horizontal(|ui| {
-                if let Some(s) = self.shown.get(self.selected) {
-                    ui.label(egui::RichText::new(&s.text).size(28.0));
-                    ui.label(egui::RichText::new(&s.name).size(15.0));
-                    ui.separator();
-                }
-                ui.label(
-                    egui::RichText::new(format!("{} emojis", self.shown.len()))
-                        .small()
-                        .weak(),
-                );
-            });
-            ui.add_space(2.0);
-        });
-
-        egui::CentralPanel::default().show(ui, |ui| {
-            egui::ScrollArea::vertical()
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    egui::Grid::new("emoji_grid")
-                        .num_columns(COLS)
-                        .spacing([6.0, 6.0])
-                        .show(ui, |ui| {
-                            for i in 0..self.shown.len() {
-                                let (text, name) = {
-                                    let s = &self.shown[i];
-                                    (s.text.clone(), s.name.clone())
-                                };
-                                let selected = i == self.selected;
-                                let button = egui::Button::new(
-                                    egui::RichText::new(&text).size(20.0),
-                                )
-                                .selected(selected);
-                                let resp = ui
-                                    .add_sized([34.0, 34.0], button)
-                                    .on_hover_text(&name);
-                                if selected && self.moved {
-                                    resp.scroll_to_me(Some(egui::Align::Center));
-                                }
-                                if resp.clicked() {
-                                    self.pick(ctx, text);
-                                }
-                                if (i + 1) % COLS == 0 {
-                                    ui.end_row();
-                                }
+        egui::CentralPanel::default()
+            .frame(egui::Frame::NONE)
+            .show(ui, |ui| {
+                ui_common::floating_shell(ui, "Emoji", ctx, |ui| {
+                    // Search
+                    ui_common::search_frame().show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new("🔍").size(15.0).color(p.text_muted));
+                            let resp = ui.add(
+                                egui::TextEdit::singleline(&mut self.search)
+                                    .hint_text("Search emojis…")
+                                    .font(egui::TextStyle::Heading)
+                                    .frame(egui::Frame::NONE)
+                                    .desired_width(f32::INFINITY),
+                            );
+                            if !self.focused_once {
+                                resp.request_focus();
+                                self.focused_once = true;
+                            }
+                            if resp.changed() {
+                                self.refilter();
                             }
                         });
-                    if self.shown.is_empty() {
-                        ui.add_space(20.0);
-                        ui.label(
-                            egui::RichText::new("No emojis match your search 🍁").weak(),
+                    });
+                    ui.add_space(8.0);
+
+                    // Grid fills remaining height above the footer.
+                    let grid_h = (ui.available_height() - 48.0).max(80.0);
+                    egui::ScrollArea::vertical()
+                        .max_height(grid_h)
+                        .min_scrolled_height(grid_h)
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            if self.shown.is_empty() {
+                                ui.add_space(28.0);
+                                ui.vertical_centered(|ui| {
+                                    ui.label(RichText::new("🍁").size(40.0));
+                                    ui.add_space(6.0);
+                                    ui.label(
+                                        RichText::new("No emojis match")
+                                            .size(15.0)
+                                            .color(p.text),
+                                    );
+                                    ui.add_space(10.0);
+                                    ui.horizontal(|ui| {
+                                        ui.add_space(
+                                            (ui.available_width() - 220.0).max(0.0) / 2.0,
+                                        );
+                                        for chip in ["coffee", "heart", "maple", "donut"] {
+                                            if ui
+                                                .add(
+                                                    egui::Button::new(
+                                                        RichText::new(chip)
+                                                            .size(12.0)
+                                                            .color(p.text),
+                                                    )
+                                                    .fill(p.bg_shade)
+                                                    .stroke(Stroke::new(1.0, p.border))
+                                                    .corner_radius(CornerRadius::same(14)),
+                                                )
+                                                .clicked()
+                                            {
+                                                self.search = chip.to_string();
+                                                self.refilter();
+                                            }
+                                        }
+                                    });
+                                });
+                                return;
+                            }
+
+                            let mut i = 0;
+                            if self.recent_count > 0 && self.search.trim().is_empty() {
+                                ui.label(
+                                    RichText::new("RECENT")
+                                        .size(11.0)
+                                        .color(p.accent)
+                                        .strong(),
+                                );
+                                ui.add_space(4.0);
+                                self.draw_grid_range(ui, ctx, &p, 0, self.recent_count);
+                                i = self.recent_count;
+                                if i < self.shown.len() {
+                                    ui.add_space(10.0);
+                                    ui.label(
+                                        RichText::new("ALL")
+                                            .size(11.0)
+                                            .color(p.text_muted)
+                                            .strong(),
+                                    );
+                                    ui.add_space(4.0);
+                                }
+                            }
+
+                            if i < self.shown.len() {
+                                self.draw_grid_range(ui, ctx, &p, i, self.shown.len());
+                            }
+                        });
+
+                    ui.add_space(6.0);
+                    // Footer status
+                    ui.horizontal(|ui| {
+                        if let Some(s) = self.shown.get(self.selected) {
+                            let text = s.text.clone();
+                            let name = s.name.clone();
+                            let recent = s.recent;
+                            if let Some(tex) = self.atlas.texture(ctx, &text) {
+                                ui.add(
+                                    egui::Image::new(egui::load::SizedTexture::new(
+                                        tex.id(),
+                                        Vec2::splat(32.0),
+                                    ))
+                                    .sense(Sense::hover()),
+                                );
+                            } else {
+                                ui.label(RichText::new(&text).size(26.0));
+                            }
+                            ui.add_space(4.0);
+                            ui.vertical(|ui| {
+                                ui.label(
+                                    RichText::new(&name)
+                                        .size(13.0)
+                                        .color(p.text)
+                                        .strong(),
+                                );
+                                if recent {
+                                    ui.label(
+                                        RichText::new("Recent")
+                                            .size(11.0)
+                                            .color(p.accent),
+                                    );
+                                }
+                            });
+                            ui.separator();
+                        }
+                        ui_common::muted_label(ui, format!("{} emojis", self.shown.len()));
+                        ui.with_layout(
+                            egui::Layout::right_to_left(egui::Align::Center),
+                            |ui| {
+                                ui_common::keycap(ui, "Esc");
+                                ui_common::muted_label(ui, "close");
+                                ui_common::keycap(ui, "Enter");
+                                ui_common::muted_label(ui, "paste");
+                                ui_common::keycap(ui, "↑↓←→");
+                                ui_common::muted_label(ui, "move");
+                            },
                         );
-                    }
+                    });
                 });
-            self.moved = false;
-        });
+            });
+
+        self.moved = false;
+    }
+}
+
+impl EmojiApp {
+    fn draw_grid_range(
+        &mut self,
+        ui: &mut egui::Ui,
+        ctx: &egui::Context,
+        p: &Palette,
+        start: usize,
+        end: usize,
+    ) {
+        egui::Grid::new(format!("emoji_grid_{start}"))
+            .num_columns(COLS)
+            .spacing([6.0, 6.0])
+            .show(ui, |ui| {
+                for i in start..end {
+                    let (text, name) = {
+                        let s = &self.shown[i];
+                        (s.text.clone(), s.name.clone())
+                    };
+                    let selected = i == self.selected;
+                    let fill = if selected {
+                        p.selection
+                    } else {
+                        Color32::TRANSPARENT
+                    };
+                    let stroke = if selected {
+                        Stroke::new(1.5, p.accent)
+                    } else {
+                        Stroke::new(1.0, Color32::TRANSPARENT)
+                    };
+
+                    // Prefer colour bitmap from Noto Color Emoji; fall back to mono text.
+                    let tex = self.atlas.texture(ctx, &text);
+                    let resp = if let Some(tex) = tex {
+                        let (rect, resp) = ui.allocate_exact_size(Vec2::splat(CELL), Sense::click());
+                        ui.painter().rect(
+                            rect,
+                            CornerRadius::same(8),
+                            fill,
+                            stroke,
+                            egui::StrokeKind::Inside,
+                        );
+                        let img_rect = egui::Rect::from_center_size(
+                            rect.center(),
+                            Vec2::splat(EMOJI_IMG),
+                        );
+                        egui::Image::new(egui::load::SizedTexture::new(tex.id(), img_rect.size()))
+                            .paint_at(ui, img_rect);
+                        resp.on_hover_text(&name)
+                    } else {
+                        let button = egui::Button::new(RichText::new(&text).size(EMOJI_SIZE))
+                            .fill(fill)
+                            .stroke(stroke)
+                            .corner_radius(CornerRadius::same(8));
+                        ui.add_sized([CELL, CELL], button).on_hover_text(&name)
+                    };
+
+                    if selected && self.moved {
+                        resp.scroll_to_me(Some(egui::Align::Center));
+                    }
+                    if resp.clicked() {
+                        self.pick(ctx, text);
+                    }
+                    if (i - start + 1) % COLS == 0 {
+                        ui.end_row();
+                    }
+                }
+            });
     }
 }
 
@@ -269,13 +436,14 @@ impl eframe::App for EmojiApp {
 pub fn run() -> Result<Option<String>> {
     let chosen = Arc::new(Mutex::new(None));
     let chosen_in_app = chosen.clone();
-    let options = ui_common::native_options("Timbits — Emoji Picker", 480.0, 560.0);
+    let options = ui_common::native_options("Timbits — Emoji", 480.0, 560.0);
 
     eframe::run_native(
         "timbits-emoji",
         options,
         Box::new(move |cc| {
             ui_common::apply_fonts(&cc.egui_ctx);
+            ui_common::apply_theme(&cc.egui_ctx);
             cc.egui_ctx
                 .send_viewport_cmd(egui::ViewportCommand::Focus);
             Ok(Box::new(EmojiApp::new(chosen_in_app)))

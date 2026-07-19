@@ -8,11 +8,13 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
-    /// Hotkey for the emoji picker, e.g. "Super+Period" (X11 only; on Wayland
-    /// bind `timbits emoji` via your desktop's keyboard settings instead).
+    /// Hotkey for the emoji picker, e.g. "Super+Period".
+    /// On X11 the daemon grabs this; on GNOME/Zorin Wayland, `timbits install`
+    /// registers it as a custom shortcut (and clears the system Super+. emoji).
     pub emoji_hotkey: String,
-    /// Hotkey for the clipboard history picker, e.g. "Super+Shift+C" (X11 only;
-    /// on Wayland, install registers the same binding via GNOME shortcuts).
+    /// Hotkey for the clipboard history picker, e.g. "Super+Shift+C".
+    /// On X11 the daemon grabs this; on GNOME/Zorin Wayland, `timbits install`
+    /// registers the same binding via GNOME shortcuts.
     pub clipboard_hotkey: String,
     /// Maximum number of clipboard history entries kept.
     pub max_entries: i64,
@@ -86,6 +88,15 @@ pub fn pending_image_path() -> PathBuf {
     data_dir().join("pending_image.png")
 }
 
+/// Written by `__serve-clip` once the clipboard offer is live.
+pub fn serve_ready_path() -> PathBuf {
+    data_dir().join("serve_ready")
+}
+
+pub fn serve_log_path() -> PathBuf {
+    data_dir().join("serve.log")
+}
+
 pub fn ensure_dirs() -> Result<()> {
     fs::create_dir_all(config_dir())?;
     fs::create_dir_all(images_dir())?;
@@ -93,7 +104,11 @@ pub fn ensure_dirs() -> Result<()> {
 }
 
 pub fn is_wayland() -> bool {
-    std::env::var("XDG_SESSION_TYPE")
+    if std::env::var("XDG_SESSION_TYPE")
         .map(|v| v.eq_ignore_ascii_case("wayland"))
         .unwrap_or(false)
+    {
+        return true;
+    }
+    std::env::var_os("WAYLAND_DISPLAY").is_some()
 }
