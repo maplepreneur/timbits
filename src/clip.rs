@@ -373,6 +373,16 @@ pub fn serve_pending(kind: &str) -> Result<()> {
     use arboard::SetExtLinux;
 
     let mut cb = Clipboard::new().context("cannot access clipboard")?;
+
+    // Signal readiness just before blocking on the offer so the parent can
+    // wait for a live claim instead of a fixed sleep.
+    let mark_ready = || {
+        let _ = fs::write(
+            config::serve_ready_path(),
+            format!("{}:{kind}", std::process::id()),
+        );
+    };
+
     match kind {
         "image" => {
             let path = config::pending_image_path();
@@ -385,6 +395,7 @@ pub fn serve_pending(kind: &str) -> Result<()> {
                 height: h as usize,
                 bytes: img.into_raw().into(),
             };
+            mark_ready();
             cb.set().wait().image(data)?;
         }
         "files" => {
@@ -397,6 +408,7 @@ pub fn serve_pending(kind: &str) -> Result<()> {
                 .filter(|l| !l.is_empty())
                 .map(PathBuf::from)
                 .collect();
+            mark_ready();
             if paths.is_empty() {
                 cb.set().wait().text(text)?;
             } else if cb.set().wait().file_list(&paths).is_err() {
@@ -407,8 +419,10 @@ pub fn serve_pending(kind: &str) -> Result<()> {
         _ => {
             let text = fs::read_to_string(config::pending_text_path())
                 .context("reading staged text")?;
+            mark_ready();
             cb.set().wait().text(text)?;
         }
     }
+    let _ = fs::remove_file(config::serve_ready_path());
     Ok(())
 }

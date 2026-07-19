@@ -175,10 +175,92 @@ pub fn install(cfg: &Config) -> Result<bool> {
         &clip_binding,
     )?;
 
+    // Super+. is also the system/IBus emoji shortcut. Custom media-keys alone
+    // lose that fight — strip the conflicting accelerator so Timbits wins.
+    let cleared = clear_system_emoji_binding(&emoji_binding);
+
     println!("GNOME shortcuts:");
     println!("  {emoji_binding} → `{emoji_cmd}`");
     println!("  {clip_binding} → `{clip_cmd}`");
+    if cleared {
+        println!("  (disabled system/IBus emoji on the same chord so Timbits owns it)");
+    }
     Ok(true)
+}
+
+/// Remove `binding` from IBus panel emoji hotkeys if present.
+/// Returns true when the system binding was changed.
+fn clear_system_emoji_binding(binding: &str) -> bool {
+    const SCHEMA: &str = "org.freedesktop.ibus.panel.emoji";
+    const KEY: &str = "hotkey";
+
+    let raw = match gsettings(&["get", SCHEMA, KEY]) {
+        Ok(r) => r,
+        Err(_) => return false,
+    };
+
+    let current = parse_gsettings_str_list(&raw);
+    if current.is_empty() {
+        return false;
+    }
+
+    let binding_l = binding.to_lowercase();
+    let filtered: Vec<String> = current
+        .into_iter()
+        .filter(|h| h.to_lowercase() != binding_l)
+        .collect();
+
+    // Nothing to do if Super+. (etc.) was not in the list.
+    if parse_gsettings_str_list(&raw).len() == filtered.len() {
+        return false;
+    }
+
+    let value = if filtered.is_empty() {
+        "@as []".to_string()
+    } else {
+        format_gsettings_str_list(&filtered)
+    };
+
+    match gsettings(&["set", SCHEMA, KEY, &value]) {
+        Ok(_) => true,
+        Err(e) => {
+            eprintln!("Warning: could not clear system emoji hotkey: {e:#}");
+            false
+        }
+    }
+}
+
+/// Parse gsettings list output like `['<Super>period', '<Super>semicolon']`.
+fn parse_gsettings_str_list(raw: &str) -> Vec<String> {
+    let trimmed = raw.trim();
+    if trimmed == "@as []" || trimmed == "[]" {
+        return Vec::new();
+    }
+    trimmed
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .split(',')
+        .filter_map(|s| {
+            let s = s.trim().trim_matches('\'').trim_matches('"');
+            if s.is_empty() {
+                None
+            } else {
+                Some(s.to_string())
+            }
+        })
+        .collect()
+}
+
+fn format_gsettings_str_list(items: &[String]) -> String {
+    if items.is_empty() {
+        return "@as []".into();
+    }
+    let inner = items
+        .iter()
+        .map(|s| format!("'{s}'"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("[{inner}]")
 }
 
 #[cfg(test)]
@@ -204,5 +286,16 @@ mod tests {
             Some("<Control>space")
         );
         assert!(to_gnome_binding("Super+").is_none());
+    }
+
+    #[test]
+    fn parses_ibus_hotkey_list() {
+        let list = parse_gsettings_str_list("['<Super>period', '<Super>semicolon']");
+        assert_eq!(list, vec!["<Super>period", "<Super>semicolon"]);
+        assert!(parse_gsettings_str_list("@as []").is_empty());
+        assert_eq!(
+            format_gsettings_str_list(&["<Super>semicolon".into()]),
+            "['<Super>semicolon']"
+        );
     }
 }

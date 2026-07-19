@@ -6,13 +6,17 @@ on other distros). Named after the Tim Hortons donut holes.
 ## Features
 
 - **Emoji picker** — opens with the cursor in the search box. Type to search
-  ~1900 emojis by name/keyword, move with the arrow keys, hit **Enter** and the
-  emoji is pasted right where your cursor was. Remembers recent picks.
+  the full Unicode emoji set (Emoji 17, fully-qualified) by name or keyword
+  (e.g. `canada`, `canadian flag`, `lol`, `coffee`), browse by category chip,
+  move with the arrow keys, hit **Enter** and the emoji is pasted right where
+  your cursor was. Remembers recent picks.
 - **Clipboard history** — stores text, file copies (uri-list) and images
   (screenshots). Search filters everything, including **text inside images
   and image files** via OCR (tesseract). Arrow keys to navigate, **Enter**
   pastes into the previously focused window, **Ctrl+Delete** forgets an entry.
 - **Hotkeys** — set your own (default `Super+.` emoji, `Super+Shift+C` history).
+- **Emoji skin tone** — in Settings, pick a preferred tone (default: none). The
+  picker lists each emoji once and pastes hands/people in your preferred tone.
 
 ## Install
 
@@ -27,8 +31,17 @@ on **GNOME / Zorin** registers the emoji and clipboard hotkeys via `gsettings`.
 Requirements:
 
 - **Rust toolchain** (build time) — https://rustup.rs
-- **Wayland pasting**: `wtype` (or a running `ydotoold`)
+- **Wayland pasting (GNOME)**: `wl-copy`/`wl-paste` plus a running **ydotoold**
+  (`ydotool`; socket often `/tmp/.ydotool_socket`). `wtype` is not supported on
+  GNOME. On X11, `xdotool`/`enigo` work.
+- **Colour emoji**: system `fonts-noto-color-emoji` (Noto Color Emoji)
+- **Emoji search data**: bundled `emojis.json` (Unicode Emoji 17 fully-qualified
+  set + emojilib-style keywords) plus built-in aliases; optional
+  `~/.config/timbits/emoji_aliases.toml`. Refresh the catalogue with
+  **Settings → Update emoji catalogue**, or `timbits update-emojis` (network).
+  Dev shipping builds: `cargo run --bin update-emojis` then rebuild.
 - **Optional, for image OCR**: `sudo apt install tesseract-ocr`
+- **No Python required** for the app (paste is pure Rust)
 
 ## Hotkey setup
 
@@ -45,8 +58,9 @@ ocr_enabled = true
 ### GNOME / Zorin (Wayland)
 
 `timbits install` registers custom shortcuts automatically (defaults
-`Super+.` and `Super+Shift+C`). No manual Settings trip needed unless you prefer
-the GUI.
+`Super+.` and `Super+Shift+C`). It also clears the system/IBus Super+. emoji
+chord so Timbits owns that key (IBus may keep Super+; for the stock picker).
+No manual Settings trip needed unless you prefer the GUI.
 
 ### Other Wayland desktops
 
@@ -67,17 +81,17 @@ autostarts on login after install, or run `timbits daemon &`).
 ```
 timbits emoji        # emoji picker
 timbits clipboard    # clipboard history
+timbits settings     # preferences (also the app-menu launcher)
 timbits daemon       # clipboard watcher (+ hotkeys on X11)
 timbits install      # first-time setup
 ```
 
 ## How pasting works
 
-When you pick something, timbits stages the content, spawns a tiny helper
-(`timbits __serve-clip`) that owns the clipboard selection until you copy
-something else (this is what makes the paste survive the picker closing on
-both X11 and Wayland), then synthesizes `Ctrl+V` in the window you came from
-(`wtype`/`ydotool` on Wayland, `enigo`/`xdotool` on X11).
+On **GNOME Wayland**, Timbits puts the selection on the clipboard with
+`wl-copy`, then synthesizes `Ctrl+V` with **ydotool** (requires `ydotoold`).
+On X11 it uses arboard + enigo/xdotool. A legacy `__serve-clip` helper remains
+as fallback.
 
 If key synthesis isn't available, the item is still on your clipboard — just
 press `Ctrl+V` yourself.

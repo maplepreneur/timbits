@@ -46,40 +46,29 @@ pub fn run() -> Result<()> {
         autostart.join("timbits.desktop").display()
     );
 
-    // Launcher entries (also handy for desktop shortcut pickers).
+    // Single app-menu launcher → settings (emoji/clipboard are hotkey-driven).
     let apps = dirs::data_dir()
         .unwrap_or_else(|| config::data_dir())
         .join("applications");
     fs::create_dir_all(&apps)?;
-    fs::write(
-        apps.join("timbits-emoji.desktop"),
-        desktop_entry(
-            "Timbits Emoji Picker",
-            "Pick and paste an emoji",
-            &format!("{exe_s} emoji"),
-            true,
-        ),
-    )?;
-    fs::write(
-        apps.join("timbits-clipboard.desktop"),
-        desktop_entry(
-            "Timbits Clipboard History",
-            "Search and paste clipboard history",
-            &format!("{exe_s} clipboard"),
-            true,
-        ),
-    )?;
-    // Combined entry for app menus.
+    // Drop legacy split launchers from earlier installs.
+    for legacy in ["timbits-emoji.desktop", "timbits-clipboard.desktop"] {
+        let p = apps.join(legacy);
+        if p.exists() {
+            let _ = fs::remove_file(&p);
+            println!("Removed legacy launcher: {}", p.display());
+        }
+    }
     fs::write(
         apps.join("timbits.desktop"),
         desktop_entry(
             "Timbits",
-            "Emoji picker and clipboard history",
-            &format!("{exe_s} clipboard"),
+            "Emoji picker, clipboard history, and settings",
+            &format!("{exe_s} settings"),
             true,
         ),
     )?;
-    println!("Launcher entries: {}", apps.display());
+    println!("Launcher entry: {}", apps.join("timbits.desktop").display());
 
     // Refresh icon / desktop caches when tools are available.
     let _ = Command::new("gtk-update-icon-cache")
@@ -89,6 +78,27 @@ pub fn run() -> Result<()> {
     let _ = Command::new("update-desktop-database")
         .arg(&apps)
         .status();
+
+    // Emoji catalogue for search (name/group/keywords). Always refresh so
+    // upgrades pick up new Unicode versions and keyword data.
+    let emoji_db_dest = config::emojis_json_path();
+    let bundled = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/emojis.json");
+    if bundled.is_file() {
+        let existed = emoji_db_dest.exists();
+        if let Err(e) = fs::copy(&bundled, &emoji_db_dest) {
+            println!("Warning: could not install emojis.json: {e}");
+        } else if existed {
+            println!("Emoji database updated: {}", emoji_db_dest.display());
+        } else {
+            println!("Emoji database: {}", emoji_db_dest.display());
+        }
+        // Optional version stamp for support / debugging.
+        let ver_src = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/emojis.version");
+        if ver_src.is_file() {
+            let ver_dest = config::data_dir().join("emojis.version");
+            let _ = fs::copy(&ver_src, &ver_dest);
+        }
+    }
 
     // GNOME/Zorin: wire hotkeys automatically when gsettings is available.
     let gnome_ok = match gnome_hotkeys::install(&cfg) {

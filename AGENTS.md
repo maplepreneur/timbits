@@ -22,33 +22,43 @@ One binary, subcommands dispatched in `src/main.rs`:
 | `ocr.rs` | Shells out to `tesseract` CLI at runtime (optional, no dev deps) |
 | `paste.rs` | Stage content → spawn `__serve-clip` → synthesize Ctrl+V (`wtype`/`ydotool` on Wayland, `enigo`/`xdotool` on X11) |
 | `daemon.rs` | Clipboard poll loop (700 ms) + X11 global hotkeys (global-hotkey crate) + hotkey string parser |
-| `emoji_picker.rs` | egui emoji grid: search-first, arrow-key nav, Enter pastes, recents file |
+| `emoji_db.rs` | Load `emojis.json`, build search blobs (keywords + aliases + flags), ranked filter |
+| `emoji_aliases.rs` | Hand-tuned Tims/slang keywords + optional user TOML |
+| `emoji_picker.rs` | egui emoji grid: search, category chips, arrow-key nav, Enter pastes, recents |
+| `emoji_raster.rs` | Colour emoji textures from system NotoColorEmoji (ttf-parser CBDT/PNG) |
 | `history_picker.rs` | egui history list + preview pane; ingests clipboard on open (focused-window read works on GNOME Wayland) |
-| `ui_common.rs` | Shared egui setup: window options, bundled emoji font, misc helpers |
+| `ui_common.rs` | Floating undecorated pickers; Adwaita-like theme from GNOME color-scheme/accent |
+| `settings.rs` | Preferences UI (hotkeys, OCR, max entries); app-menu launcher target |
 | `install.rs` | `timbits install`: default config, autostart, launcher entries, GNOME hotkeys |
-| `gnome_hotkeys.rs` | GNOME/Zorin custom keybindings via `gsettings` (Wayland hotkeys) |
+| `gnome_hotkeys.rs` | GNOME/Zorin custom keybindings via `gsettings`; clears IBus Super+. conflict |
 
 ## Key design decisions (don't regress these!)
 
-1. **Paste persistence**: on both X11 and Wayland the clipboard selection dies
-   with its owner. The picker therefore spawns `timbits __serve-clip <kind>`
-   which claims the selection with arboard's `set().wait()` and blocks until
-   replaced. Never set the clipboard in the picker process right before exit.
-2. **Emoji font**: egui/ab_glyph cannot rasterize color CBDT fonts (Noto Color
-   Emoji). We bundle monochrome `assets/NotoEmoji.ttf` (variable font from
-   google/fonts, ~2 MB) and register it as a fallback family in
-   `ui_common::apply_fonts`. Keep it in git.
-3. **egui 0.35 API**: `eframe::App` uses `fn ui(&mut self, ui: &mut egui::Ui,
+1. **Paste (pure Rust)**: `paste.rs` ports emoji-picker.sh + inject-paste.py.
+   Flow: `wl-copy` → sleep 350 ms → `ydotool key super+v` (or `ctrl+shift+v`
+   in terminals via keyd-last-focus) → uinput fallback. No Python at runtime.
+   Do **not** use `ydotool type` for emoji.
+2. **Emoji search**: full Unicode fully-qualified set in `assets/emojis.json`
+   (regenerate via Settings → Update emoji catalogue, `timbits update-emojis`, or
+   `cargo run --bin update-emojis` for shipping assets). Search blob =
+   name/group/keywords + `emoji_aliases.rs` + optional user TOML + flag demonyms.
+   Skin-tone variants hidden; `emoji_skin_tone` applies preferred tone on paste.
+   Load order: env override → user data dir if version ≥ bundled → bundled.
+   `emoji_update.rs` holds the download/parse logic shared by CLI and Settings.
+3. **Emoji font**: colour glyphs via `emoji_raster` (NotoColorEmoji CBDT +
+   rustybuzz shaping for flags/ZWJ/skin tones); monochrome `assets/NotoEmoji.ttf`
+   remains a text fallback only.
+4. **egui 0.35 API**: `eframe::App` uses `fn ui(&mut self, ui: &mut egui::Ui,
    frame)`. Panels are the unified `egui::Panel::{top,bottom,left,right}` +
    `egui::CentralPanel`, all shown from that root `ui`, central LAST.
-4. **Key handling**: read `ctx.input(|i| i.key_pressed(...))` at the TOP of
+5. **Key handling**: read `ctx.input(|i| i.key_pressed(...))` at the TOP of
    `App::ui` and `consume_key` for arrows, so the focused search field doesn't
    swallow navigation keys.
-5. **GNOME Wayland**: unfocused clipboard reads are impossible; daemon poll
+6. **GNOME Wayland**: unfocused clipboard reads are impossible; daemon poll
    silently no-ops there, `history_picker` ingests on open instead. KDE/wlroots
    work via data-control. Global hotkeys don't exist on Wayland — users bind
    DE shortcuts to `timbits emoji` / `timbits clipboard`.
-6. **OCR**: never link tesseract; shell out (`tesseract <png> stdout`) in a
+7. **OCR**: never link tesseract; shell out (`tesseract <png> stdout`) in a
    background thread, update `ocr_text` afterwards.
 
 ## Conventions
@@ -65,6 +75,7 @@ One binary, subcommands dispatched in `src/main.rs`:
 
 ```
 Cargo.toml  install.sh  README.md  AGENTS.md
-assets/NotoEmoji.ttf  assets/logo.png
-src/{main,config,storage,clip,ocr,paste,daemon,emoji_picker,history_picker,install,gnome_hotkeys,ui_common}.rs
+assets/emojis.json  assets/emojis.version  assets/NotoEmoji.ttf  assets/logo.png
+src/bin/update_emojis.rs
+src/{main,config,storage,clip,ocr,paste,daemon,emoji_db,emoji_aliases,emoji_picker,emoji_raster,history_picker,install,gnome_hotkeys,ui_common}.rs
 ```
