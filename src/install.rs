@@ -46,30 +46,19 @@ pub fn run() -> Result<()> {
         autostart.join("timbits.desktop").display()
     );
 
-    // Launcher entries (also handy for desktop shortcut pickers).
+    // Single app-menu launcher (emoji/clipboard are opened via hotkeys).
     let apps = dirs::data_dir()
         .unwrap_or_else(|| config::data_dir())
         .join("applications");
     fs::create_dir_all(&apps)?;
-    fs::write(
-        apps.join("timbits-emoji.desktop"),
-        desktop_entry(
-            "Timbits Emoji Picker",
-            "Pick and paste an emoji",
-            &format!("{exe_s} emoji"),
-            true,
-        ),
-    )?;
-    fs::write(
-        apps.join("timbits-clipboard.desktop"),
-        desktop_entry(
-            "Timbits Clipboard History",
-            "Search and paste clipboard history",
-            &format!("{exe_s} clipboard"),
-            true,
-        ),
-    )?;
-    // Combined entry for app menus.
+    // Drop legacy split launchers from earlier installs.
+    for legacy in ["timbits-emoji.desktop", "timbits-clipboard.desktop"] {
+        let p = apps.join(legacy);
+        if p.exists() {
+            let _ = fs::remove_file(&p);
+            println!("Removed legacy launcher: {}", p.display());
+        }
+    }
     fs::write(
         apps.join("timbits.desktop"),
         desktop_entry(
@@ -79,7 +68,7 @@ pub fn run() -> Result<()> {
             true,
         ),
     )?;
-    println!("Launcher entries: {}", apps.display());
+    println!("Launcher entry: {}", apps.join("timbits.desktop").display());
 
     // Refresh icon / desktop caches when tools are available.
     let _ = Command::new("gtk-update-icon-cache")
